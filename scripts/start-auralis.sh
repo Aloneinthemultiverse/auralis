@@ -19,7 +19,8 @@ status() {
            "searxng|up http://localhost:8888" \
            "ollama|up http://localhost:11434/api/tags" \
            "laya|up http://localhost:8000/health" \
-           "core|up http://localhost:8080/actuator/health"; do
+           "core|up http://localhost:8080/actuator/health" \
+           "semiconductor|up http://localhost:8090/actuator/health"; do
     name="${s%%|*}"; check="${s#*|}"
     if eval "$check" 2>/dev/null; then echo "  ✓ $name"; else echo "  ✗ $name"; fi
   done
@@ -52,6 +53,17 @@ if ! up http://localhost:8000/health; then
      </dev/null >"$LOGS/laya.log" 2>&1 &)
   wait_for http://localhost:8000/health laya 60 || exit 1
 else echo "  ✓ laya"; fi
+
+SEMI="${AURALIS_SEMI_DIR:-$ROOT/../auralis-semiconductor}"
+if [ -d "$SEMI/server" ]; then
+  echo "Semiconductor domain server"
+  docker image inspect auralis-eda >/dev/null 2>&1 || docker build -q -t auralis-eda "$SEMI/eda" >/dev/null
+  if ! up http://localhost:8090/actuator/health; then
+    (cd "$SEMI/server" && nohup ./mvnw -q -B spring-boot:run </dev/null >"$LOGS/semiconductor.log" 2>&1 &)
+    wait_for http://localhost:8090/actuator/health "semiconductor (MCP :8090/mcp)" 90 || true
+  else echo "  ✓ semiconductor"; fi
+fi
+docker image inspect auralis-pysandbox >/dev/null 2>&1 || docker build -q -t auralis-pysandbox "$ROOT/infra/pysandbox" >/dev/null
 
 echo "Auralis core"
 if ! up http://localhost:8080/actuator/health; then

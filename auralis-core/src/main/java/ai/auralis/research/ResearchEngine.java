@@ -87,15 +87,16 @@ public class ResearchEngine {
                 researchRound(sessionId, round, open, session.deepMode());
 
                 List<Finding> findings = findings(sessionId);
-                Sufficiency s = gate.sufficiency(objective, ResearchAnalyst.render(findings));
+                Sufficiency s = gate.sufficiency(sessionId, objective, ResearchAnalyst.render(findings));
                 store.roundCompleted(sessionId, round, json.writeValueAsString(s));
                 store.event(sessionId, round, "SUFFICIENCY", String.format(Locale.ROOT,
-                        "sufficient=%.2f contradiction=%.2f next=%s",
-                        s.sufficient(), s.contradiction(), s.next()));
+                        "sufficient=%s (Laya P=%s, decided by %s) contradiction=%s next=%s",
+                        s.sufficient(), s.pSufficient() == null ? "n/a"
+                                : String.format(Locale.ROOT, "%.2f", s.pSufficient()),
+                        s.sufficientBy(), s.contradiction(), s.next()));
 
                 long unresolved = findings.stream().filter(f -> !f.resolved()).count();
-                if (unresolved == 0 && s.sufficient() >= cfg.sufficientThreshold()
-                        && s.contradiction() < 0.5) {
+                if (unresolved == 0 && s.sufficient() && !s.contradiction()) {
                     outcome = Status.SUFFICIENT;
                     store.event(sessionId, round, "STOP", "evidence judged sufficient");
                     break;
@@ -143,6 +144,7 @@ public class ResearchEngine {
         for (Question q : open) {
             Answer a = synthesize(q);
             answers.put(q.id(), a);
+            gate.answerability(sessionId, q.text(), evidenceText(q), a.fullyAnswered(), a.missing());
             if (!a.fullyAnswered()) {
                 escalate.add(q);
                 store.event(sessionId, round, "GAP_IN_EVIDENCE",
@@ -189,6 +191,11 @@ public class ResearchEngine {
                             : a.answer() + "\n\nStill missing: " + a.missing(),
                     topical.get(q.id()));
         }
+    }
+
+    private String evidenceText(Question q) {
+        return store.evidence(q.id()).stream().map(EvidenceRow::content)
+                .collect(Collectors.joining("\n\n"));
     }
 
     private Answer synthesize(Question q) {

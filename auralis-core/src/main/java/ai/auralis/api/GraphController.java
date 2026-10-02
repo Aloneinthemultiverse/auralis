@@ -19,6 +19,7 @@ import org.springframework.web.bind.annotation.RestController;
 import ai.auralis.graph.GraphService;
 import ai.auralis.graph.GraphService.NodeView;
 import ai.auralis.graph.GraphStore.Node;
+import ai.auralis.library.LibraryImporter;
 import ai.auralis.osint.OsintCatalogImporter;
 import ai.auralis.osint.OsintCatalogImporter.ImportResult;
 
@@ -28,10 +29,27 @@ public class GraphController {
 
     private final GraphService graph;
     private final OsintCatalogImporter osint;
+    private final LibraryImporter library;
 
-    public GraphController(GraphService graph, OsintCatalogImporter osint) {
+    public GraphController(GraphService graph, OsintCatalogImporter osint, LibraryImporter library) {
         this.graph = graph;
         this.osint = osint;
+        this.library = library;
+    }
+
+    public record LibraryRequest(@NotBlank String manifest, String cacheDir) {
+    }
+
+    /** Download, ingest and link a library of free sources described by a manifest. */
+    @PostMapping("/import/library")
+    public ResponseEntity<?> importLibrary(@Valid @RequestBody LibraryRequest req) throws java.io.IOException {
+        Path manifest = Path.of(req.manifest());
+        if (!Files.isRegularFile(manifest)) {
+            return ResponseEntity.badRequest().body("not a file: " + req.manifest());
+        }
+        Path cache = req.cacheDir() != null ? Path.of(req.cacheDir())
+                : manifest.toAbsolutePath().getParent().resolve("cache");
+        return ResponseEntity.ok(library.importManifest(manifest, cache));
     }
 
     public record ImportRequest(@NotBlank String path) {

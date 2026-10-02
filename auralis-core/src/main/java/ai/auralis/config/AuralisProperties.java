@@ -1,6 +1,7 @@
 package ai.auralis.config;
 
 import java.time.Duration;
+import java.util.Map;
 
 import org.springframework.boot.context.properties.ConfigurationProperties;
 
@@ -11,7 +12,8 @@ public record AuralisProperties(
         Retrieval retrieval,
         Laya laya,
         Research research,
-        DeepResearch deepResearch) {
+        DeepResearch deepResearch,
+        Map<String, String> toolServers) {
 
     public record Embedding(int dimensions, int batchSize) {
     }

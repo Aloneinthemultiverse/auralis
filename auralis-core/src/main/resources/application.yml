@@ -54,6 +54,11 @@ auralis:
     max-questions-per-round: 5
     evidence-per-question: 5
     sufficient-threshold: 0.6
+  # Domain / tool MCP servers Auralis connects to (lazily; may be down at startup).
+  # Their tools join the design tool registry; a <domain>_guidance + <domain>_validate
+  # pair registers a design domain.
+  tool-servers:
+    semiconductor: http://localhost:8090
   deep-research:
     agent-harness-dir: ../vendor/AgentHarness
     python: .venv/Scripts/python.exe

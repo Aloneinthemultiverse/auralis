@@ -28,6 +28,8 @@
 	</scm>
 	<properties>
 		<java.version>21</java.version>
+		<!-- Windows: JDK NIO needs a short Unix-domain socket dir (also for the forked test JVM). -->
+		<argLine>-Djdk.net.unixdomain.tmpdir=C:/Temp/auralis</argLine>
 		<spring-ai.version>2.0.1</spring-ai.version>
 	</properties>
 	<dependencies>

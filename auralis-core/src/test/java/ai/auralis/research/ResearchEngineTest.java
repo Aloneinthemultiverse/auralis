@@ -12,7 +12,6 @@ import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
 import java.util.List;
-import java.util.Map;
 import java.util.UUID;
 
 import org.junit.jupiter.api.Test;
@@ -79,8 +78,8 @@ class ResearchEngineTest {
     @Test
     void escalatesOnlyUnansweredQuestionsAndStopsWhenSufficient() {
         commonStubs();
-        when(gate.sufficiency(anyString(), anyString()))
-                .thenReturn(new Sufficiency(0.9, 0.1, "design", Map.of()));
+        when(gate.sufficiency(any(), anyString(), anyString()))
+                .thenReturn(new Sufficiency(true, 0.9, "LAYA", false, "design"));
         when(local.research(anyList())).thenAnswer(inv -> {
             List<DeepResearch.Query> qs = inv.getArgument(0);
             return qs.stream().map(q -> new DeepResearch.Finding(q.id(), q.question(),
@@ -110,8 +109,8 @@ class ResearchEngineTest {
     @Test
     void withoutDeepResearchUnansweredStaysUnresolvedAndGapsDriveNextRound() {
         commonStubs();
-        when(gate.sufficiency(anyString(), anyString()))
-                .thenReturn(new Sufficiency(0.2, 0.1, "research", Map.of()));
+        when(gate.sufficiency(any(), anyString(), anyString()))
+                .thenReturn(new Sufficiency(false, 0.2, "LAYA", false, "research"));
         when(analyst.answer(eq(UNKNOWN), anyList()))
                 .thenReturn(new Answer("not in evidence", false, "a measured SER"));
         when(analyst.answer(eq("Which ECC scheme fits 32-bit words?"), anyList()))

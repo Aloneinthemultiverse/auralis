@@ -2,53 +2,63 @@ package ai.auralis.research;
 
 import java.util.LinkedHashMap;
 import java.util.Map;
+import java.util.UUID;
 
 import org.springframework.stereotype.Component;
 
-import ai.auralis.laya.LayaAnswer;
-import ai.auralis.laya.LayaClient;
-import ai.auralis.laya.LayaQuestion;
+import ai.auralis.config.AuralisProperties;
+import ai.auralis.decision.DecisionService;
+import ai.auralis.decision.DecisionService.Decision;
+import ai.auralis.decision.DecisionService.Policy;
+import ai.auralis.decision.DecisionService.Spec;
 
 /**
- * Laya's control decisions over the research state: fast typed judgements, so
- * the main LLM is only used for reasoning. Zero-shot Laya judges topic well
- * but not whether a passage answers a specific question, so per-question
- * answerability is left to the analyst.
+ * The research loop's control decisions, all through {@link DecisionService}
+ * (Laya first, recorded in the ledger). Zero-shot Laya judges topic well but not
+ * whether evidence answers a specific question, so answerability is advisory:
+ * Laya votes, the analyst's verdict stands.
  */
 @Component
 public class ResearchGate {
 
-    /** Laya reads a bounded window; keep the most informative head of the state. */
-    private static final int MAX_STATE_CHARS = 2400;
+    private static final String SCOPE = "research";
 
-    /** Laya's view of the whole research state at the end of a round. */
-    public record Sufficiency(double sufficient, double contradiction, String next,
-                              Map<String, Double> nextProbabilities) {
+    /** The state of the whole research at the end of a round. */
+    public record Sufficiency(boolean sufficient, Double pSufficient, String sufficientBy,
+                              boolean contradiction, String next) {
     }
 
-    private final LayaClient laya;
+    private final DecisionService decisions;
+    private final double minConfidence;
 
-    public ResearchGate(LayaClient laya) {
-        this.laya = laya;
+    public ResearchGate(DecisionService decisions, AuralisProperties props) {
+        this.decisions = decisions;
+        this.minConfidence = props.research().sufficientThreshold();
     }
 
-    public Sufficiency sufficiency(String objective, String state) {
-        Map<String, LayaQuestion> qs = new LinkedHashMap<>();
-        qs.put("sufficient", LayaQuestion.yesNo(
-                "Is this research enough to make an engineering decision for: " + objective));
-        qs.put("contradiction", LayaQuestion.yesNo(
-                "Do any of these findings contradict each other?"));
-        qs.put("next", LayaQuestion.choice("What should happen next?", Map.of(
-                "design", "the findings are enough to start designing",
-                "research", "important facts are still missing and need more research",
-                "ask_user", "requirements from the user are missing or ambiguous")));
-        Map<String, LayaAnswer> a = laya.decide(bounded(state), qs);
-        return new Sufficiency(a.get("sufficient").yesProbability(),
-                a.get("contradiction").yesProbability(),
-                a.get("next").choice(), a.get("next").probabilities());
+    public Sufficiency sufficiency(UUID sessionId, String objective, String state) {
+        Decision suff = decisions.decide(Spec.yesNo(SCOPE, sessionId, "sufficiency",
+                Policy.LAYA_THEN_LLM,
+                "Is this research enough to make an engineering decision for: " + objective,
+                state).withMinConfidence(minConfidence));
+        Decision contra = decisions.decide(Spec.yesNo(SCOPE, sessionId, "contradiction",
+                Policy.LAYA, "Do any of these findings contradict each other?", state));
+        Map<String, String> next = new LinkedHashMap<>();
+        next.put("research", "important facts are still missing and need more research");
+        next.put("design", "the findings are enough to start designing");
+        next.put("ask_user", "requirements from the user are missing or ambiguous");
+        Decision step = decisions.decide(Spec.choice(SCOPE, sessionId, "next_step",
+                Policy.LAYA, "What should happen next?", next, state));
+        return new Sufficiency(suff.yes(),
+                suff.layaProbabilities() == null ? null : suff.layaProbabilities().get("yes"),
+                suff.decidedBy(), contra.yes(), step.answer());
     }
 
-    private static String bounded(String s) {
-        return s.length() <= MAX_STATE_CHARS ? s : s.substring(0, MAX_STATE_CHARS);
+    /** Records the analyst's answerability verdict with Laya's vote alongside it. */
+    public void answerability(UUID sessionId, String question, String evidence,
+                              boolean answered, String missing) {
+        decisions.recordWithLlmVerdict(Spec.yesNo(SCOPE, sessionId, "answerability",
+                Policy.LAYA_ADVISORY, "Does this evidence answer the question: " + question,
+                evidence), answered, answered ? "evidence states the answer" : "missing: " + missing);
     }
 }
