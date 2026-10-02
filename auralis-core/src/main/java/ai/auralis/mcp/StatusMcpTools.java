@@ -20,10 +20,12 @@ public class StatusMcpTools {
     private final RestClient http;
     private final JdbcClient jdbc;
     private final ToolServerConnections servers;
+    private final ai.auralis.knowledge.StorageGuard storage;
     private final String layaUrl;
     private final String ollamaUrl;
 
     public StatusMcpTools(RestClient.Builder builder, JdbcClient jdbc, ToolServerConnections servers,
+                          ai.auralis.knowledge.StorageGuard storage,
                           AuralisProperties props,
                           @org.springframework.beans.factory.annotation.Value(
                                   "${spring.ai.ollama.base-url}") String ollamaUrl) {
@@ -33,6 +35,7 @@ public class StatusMcpTools {
         this.http = builder.clone().requestFactory(f).build();
         this.jdbc = jdbc;
         this.servers = servers;
+        this.storage = storage;
         this.layaUrl = props.laya().baseUrl();
         this.ollamaUrl = ollamaUrl;
     }
@@ -49,6 +52,14 @@ public class StatusMcpTools {
             long chunks = jdbc.sql("SELECT count(*) FROM chunk").query(Long.class).single();
             long docs = jdbc.sql("SELECT count(*) FROM source_document").query(Long.class).single();
             lines.add("✓ database: " + docs + " documents, " + chunks + " chunks");
+            var u = storage.usage();
+            boolean ok = u.freeGb() >= u.minFreeGb() && u.dbGb() <= u.maxDbGb();
+            lines.add((ok ? "✓ " : "✗ ") + String.format(java.util.Locale.ROOT,
+                    "storage: %.1f GB free (min %.0f), knowledge base %.2f GB (cap %.0f)",
+                    u.freeGb(), u.minFreeGb(), u.dbGb(), u.maxDbGb()));
+            if (!ok) {
+                fixes.add("free disk space or raise auralis.storage.* — collection is paused until then");
+            }
         } catch (Exception e) {
             lines.add("✗ database");
             fixes.add("start Postgres: `docker compose up -d` in the Auralis repo");

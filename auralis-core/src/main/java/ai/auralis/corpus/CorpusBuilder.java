@@ -88,6 +88,7 @@ public class CorpusBuilder {
 
     private final ArxivClient arxiv;
     private final GitHubRepoSource github;
+    private final ai.auralis.knowledge.StorageGuard storage;
     private final HarvestSources harvestSources;
     private final OpenAlexClient openAlex;
     private final DecisionService decisions;
@@ -101,10 +102,11 @@ public class CorpusBuilder {
     private final HttpClient http = HttpClient.newBuilder().followRedirects(HttpClient.Redirect.ALWAYS)
             .connectTimeout(Duration.ofSeconds(20)).build();
 
-    public CorpusBuilder(ArxivClient arxiv, GitHubRepoSource github, HarvestSources harvestSources, OpenAlexClient openAlex, DecisionService decisions,
+    public CorpusBuilder(ArxivClient arxiv, ai.auralis.knowledge.StorageGuard storage, GitHubRepoSource github, HarvestSources harvestSources, OpenAlexClient openAlex, DecisionService decisions,
                          IngestionService ingestion, GraphStore graph, LocalDeepResearch localDeep,
                          KaggleDeepResearch kaggleDeep, JsonMapper json) {
         this.arxiv = arxiv;
+        this.storage = storage;
         this.github = github;
         this.harvestSources = harvestSources;
         this.openAlex = openAlex;
@@ -124,12 +126,19 @@ public class CorpusBuilder {
             try {
                 build(job, m, cacheDir, topicLimit == null ? Integer.MAX_VALUE : topicLimit);
                 job.status = "DONE";
+            } catch (ai.auralis.knowledge.StorageGuard.StorageFullException full) {
+                job.note(full.getMessage());
+                job.status = "PAUSED";
+                job.phase = full.getMessage();
+                return;
             } catch (Exception ex) {
                 log.error("corpus build {} failed", job.id, ex);
                 job.note("FAILED: " + ex);
                 job.status = "FAILED";
             }
-            job.phase = "finished";
+            if (!"PAUSED".equals(job.status)) {
+                job.phase = "finished";
+            }
         });
         return job;
     }
@@ -473,6 +482,7 @@ public class CorpusBuilder {
 
     /** Downloads and ingests one work; returns its graph node, or null if it was skipped. */
     private UUID ingest(Job job, String ns, UUID topicId, Candidate c, Path cacheDir) {
+        storage.check(); // a full disk stops the build instead of failing every item
         try {
             Path file = cacheDir.resolve(c.key().replaceAll("[^A-Za-z0-9._-]", "_") + ".pdf");
             if (!Files.exists(file) || Files.size(file) == 0) {

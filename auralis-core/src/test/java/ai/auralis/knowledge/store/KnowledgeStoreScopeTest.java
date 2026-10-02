@@ -33,6 +33,20 @@ class KnowledgeStoreScopeTest {
     }
 
     @Test
+    void rareTermsOutrankRepeatedCommonOnesBm25Idf() {
+        String tag = "zq" + UUID.randomUUID().toString().substring(0, 6).replaceAll("[0-9-]", "x");
+        // Common words repeated many times vs. one rare, decisive identifier.
+        UUID noisy = store.saveDocument("noisy " + tag, "paper", null, "n1" + tag,
+                List.of(new NewChunk(("word bit word bit memory word bit " + tag + " ").repeat(20), vec(0.5f))));
+        UUID decisive = store.saveDocument("decisive " + tag, "paper", null, "n2" + tag,
+                List.of(new NewChunk("The " + tag + "secded code protects a 64-bit word.", vec(0.4f))));
+        var hits = store.keywordSearch(tag + "secded word bit", 5, Scope.ALL);
+        assertThat(hits).isNotEmpty();
+        assertThat(hits.getFirst().documentId()).isEqualTo(decisive);
+        assertThat(hits).extracting(KnowledgeStore.ChunkHit::documentId).contains(noisy);
+    }
+
+    @Test
     void unscopedNotebookAndDocumentScopesAllWork() {
         String tag = UUID.randomUUID().toString().substring(0, 8);
         UUID inNotebook = store.saveDocument("in " + tag, "paper", null, "h1" + tag,

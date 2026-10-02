@@ -122,11 +122,12 @@ public class NotebookService {
 
     public Answer ask(String notebook, String question, List<UUID> documentIds) {
         Map<String, String> routes = new LinkedHashMap<>();
-        routes.put("ask", "a question to answer from the existing sources");
-        routes.put("research", "asks to investigate a topic beyond the sources or run deep research");
-        routes.put("design", "asks to design, generate or verify hardware, RTL or a system");
+        // Short labels: measured on Laya, long option descriptions misroute plain questions.
+        routes.put("ask", "an answer");
+        routes.put("research", "new research");
+        routes.put("design", "a design");
         var route = decisions.decide(Spec.choice("chat", null, "chat_route", Policy.LAYA,
-                "What does this message ask for?", routes, question));
+                "What does the user want?", routes, question));
 
         Scope scope = Scope.of(notebook, documentIds);
         List<Evidence> hits = retriever.retrieve(question, 8, true, scope);

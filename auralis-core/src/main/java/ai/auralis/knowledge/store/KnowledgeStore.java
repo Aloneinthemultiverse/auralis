@@ -93,16 +93,48 @@ public class KnowledgeStore {
         return keywordSearch(query, limit, Scope.ALL);
     }
 
+    /**
+     * BM25-style lexical search: each query term is weighted by its inverse document
+     * frequency over all chunks, so rare decisive terms (SECDED, a part number, a
+     * protocol name) outrank common ones (bit, word, design). Postgres' ts_rank has no
+     * IDF on its own; document frequencies come from the GIN index per query.
+     */
     public List<ChunkHit> keywordSearch(String query, int limit, Scope scope) {
-        List<Object> params = new ArrayList<>(List.of(query));
+        List<String> terms = jdbc.sql("SELECT unnest(tsvector_to_array(to_tsvector('english', ?)))")
+                .param(query).query(String.class).list();
+        if (terms.isEmpty()) {
+            return List.of();
+        }
+        terms = terms.stream().limit(12).toList();
+        double n = Math.max(1, countChunks());
+        StringBuilder score = new StringBuilder();
+        List<Object> scoreParams = new ArrayList<>();
+        List<String> quoted = new ArrayList<>();
+        for (String t : terms) {
+            String q = "'" + t.replace("'", "''") + "'";
+            long df = jdbc.sql("SELECT count(*) FROM chunk WHERE tsv @@ to_tsquery('simple', ?)")
+                    .param(q).query(Long.class).single();
+            double idf = Math.log((n - df + 0.5) / (df + 0.5) + 1.0);
+            if (score.length() > 0) {
+                score.append(" + ");
+            }
+            // BM25-like term weight: presence earns the full IDF, repetition only a small,
+            // saturating bonus (ts_rank_cd normalised into [0,1)).
+            score.append("?::float8 * (CASE WHEN c.tsv @@ to_tsquery('simple', ?) THEN 1 + 0.5 * ts_rank_cd(c.tsv, to_tsquery('simple', ?), 32) ELSE 0 END)");
+            scoreParams.add(idf);
+            scoreParams.add(q);
+            scoreParams.add(q);
+            quoted.add(q);
+        }
+        List<Object> params = new ArrayList<>(scoreParams);
+        params.add(String.join(" | ", quoted));
         params.addAll(java.util.Arrays.asList(scope.params())); // may contain nulls (unscoped)
         params.add(limit);
         return jdbc.sql("""
-                SELECT c.id, c.document_id, d.title, c.ordinal, c.content,
-                       ts_rank_cd(c.tsv, k.q, 32) AS score
-                FROM chunk c JOIN source_document d ON d.id = c.document_id,
-                     (SELECT NULLIF(replace(plainto_tsquery('english', ?)::text, '&', '|'), '')::tsquery AS q) k
-                WHERE c.tsv @@ k.q""" + scope.sql() + """
+                SELECT c.id, c.document_id, d.title, c.ordinal, c.content, (""" + score + """
+                ) AS score
+                FROM chunk c JOIN source_document d ON d.id = c.document_id
+                WHERE c.tsv @@ to_tsquery('simple', ?)""" + scope.sql() + """
 
                 ORDER BY score DESC
                 LIMIT ?""")

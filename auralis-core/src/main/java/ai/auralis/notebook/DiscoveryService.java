@@ -104,6 +104,7 @@ public class DiscoveryService {
     }
 
     private final ArxivClient arxiv;
+    private final ai.auralis.knowledge.StorageGuard storage;
     private final ai.auralis.corpus.NtrsClient ntrs;
     private final OpenAlexClient openAlex;
     private final WebSearchClient web;
@@ -122,11 +123,12 @@ public class DiscoveryService {
     private final HttpClient http = HttpClient.newBuilder().followRedirects(HttpClient.Redirect.ALWAYS)
             .connectTimeout(Duration.ofSeconds(20)).build();
 
-    public DiscoveryService(ArxivClient arxiv, ai.auralis.corpus.NtrsClient ntrs, OpenAlexClient openAlex, WebSearchClient web,
+    public DiscoveryService(ArxivClient arxiv, ai.auralis.knowledge.StorageGuard storage, ai.auralis.corpus.NtrsClient ntrs, OpenAlexClient openAlex, WebSearchClient web,
                             GitHubRepoSource github, DecisionService decisions, IngestionService ingestion,
                             GraphStore graph, LocalDeepResearch localDeep, KaggleDeepResearch kaggleDeep,
                             JsonMapper json, @Value("${GITHUB_TOKEN:}") String githubToken) {
         this.arxiv = arxiv;
+        this.storage = storage;
         this.ntrs = ntrs;
         this.openAlex = openAlex;
         this.web = web;
@@ -324,6 +326,7 @@ public class DiscoveryService {
 
     /** Downloads/ingests one source into a notebook under {@code root}; returns its chunk count. */
     public int importOne(String ns, UUID root, Found f) throws Exception {
+        storage.check();
         if ("repo".equals(f.kind())) {
             String repo = f.title();
             var repoNode = graph.upsertNode(ns, "repo:" + repo, "DESIGN", repo, f.url(), null,
