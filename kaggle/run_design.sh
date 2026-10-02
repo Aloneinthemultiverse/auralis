@@ -5,6 +5,7 @@
 #
 # job.json: {statement, evidence, guidance, maxBlocks, iterations[, blocks]}
 set -euo pipefail
+export PYTHONUTF8=1 PYTHONIOENCODING=utf-8
 
 HERE="$(cd "$(dirname "$0")" && pwd)"
 JOBFILE="${1:?job.json required}"
@@ -18,7 +19,8 @@ rm -rf "$BUILD" && mkdir -p "$BUILD"
 python - "$HERE/design-worker/worker.py" "$JOBFILE" "$BUILD/worker.py" <<'PY'
 import json, sys
 src, job, dst = sys.argv[1:]
-code = open(src, encoding="utf-8").read().replace("__JOB__", repr(json.load(open(job, encoding="utf-8"))))
+code = open(src, encoding="utf-8").read().replace("__JOB__", ascii(json.load(open(job, encoding="utf-8"))))
+code = code.encode("ascii", "backslashreplace").decode("ascii")  # Kaggle CLI on Windows reads cp1252
 open(dst, "w", encoding="utf-8").write(code)
 PY
 cat > "$BUILD/kernel-metadata.json" <<EOF

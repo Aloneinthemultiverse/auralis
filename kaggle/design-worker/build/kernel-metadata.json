@@ -1,0 +1,14 @@
+{
+  "id": "sujitnarrayanm/auralis-design-worker",
+  "title": "auralis-design-worker",
+  "code_file": "worker.py",
+  "language": "python",
+  "kernel_type": "script",
+  "is_private": true,
+  "enable_gpu": true,
+  "machine_shape": "NvidiaTeslaT4",
+  "enable_internet": true,
+  "dataset_sources": [],
+  "competition_sources": [],
+  "kernel_sources": []
+}
