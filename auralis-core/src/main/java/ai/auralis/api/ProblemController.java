@@ -51,6 +51,14 @@ public class ProblemController {
         return problems.job(id).map(ResponseEntity::ok).orElse(ResponseEntity.notFound().build());
     }
 
+    /** Large designs: derive the RTL blocks and design them one by one. */
+    @PostMapping("/{id}/design-blocks")
+    public List<ProblemService.BlockRun> designBlocks(@PathVariable UUID id,
+                                                      @RequestBody(required = false) DesignRequest req) {
+        int it = req == null || req.iterations() == null ? 3 : Math.max(1, Math.min(10, req.iterations()));
+        return problems.designBlocks(id, it);
+    }
+
     @PostMapping("/{id}/design")
     public Map<String, Object> design(@PathVariable UUID id, @RequestBody(required = false) DesignRequest req) {
         int it = req == null || req.iterations() == null ? 3 : Math.max(1, Math.min(10, req.iterations()));

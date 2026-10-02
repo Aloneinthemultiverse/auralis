@@ -1,3 +1,6 @@
 spring:
   datasource:
     url: jdbc:postgresql://localhost:5433/auralis_test
+auralis:
+  vector:
+    backend: pgvector   # tests must not write into the real TurboVec index

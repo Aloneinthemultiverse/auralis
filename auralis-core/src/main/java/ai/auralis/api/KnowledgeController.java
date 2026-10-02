@@ -73,6 +73,12 @@ public class KnowledgeController {
         return retriever.retrieve(req.query(), topK, rerank);
     }
 
+    /** Loads every existing chunk into the TurboVec index (calibrates on a sample first). */
+    @PostMapping("/reindex-turbovec")
+    public String reindexTurbovec() {
+        return "indexed " + store.reindexTurbovec() + " chunks into TurboVec";
+    }
+
     @GetMapping("/stats")
     public Stats stats() {
         return new Stats(store.countChunks());

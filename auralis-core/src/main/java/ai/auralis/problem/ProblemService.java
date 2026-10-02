@@ -50,6 +50,25 @@ public class ProblemService {
     public record Breakdown(String title, List<Part> parts) {
     }
 
+    /** One RTL block of a large design: its own small, verifiable spec. */
+    public record Block(String name, String spec) {
+    }
+
+    record Blocks(List<Block> blocks) {
+    }
+
+    public static final class BlockRun {
+        public final String name;
+        public final String spec;
+        public volatile UUID designId;
+        public volatile String status = "WAITING";
+
+        BlockRun(String name, String spec) {
+            this.name = name;
+            this.spec = spec;
+        }
+    }
+
     /** Live progress for one part. */
     public static final class PartProgress {
         public final String name;
@@ -77,6 +96,8 @@ public class ProblemService {
         public volatile Breakdown breakdown;
         public final Map<String, PartProgress> parts = Collections.synchronizedMap(new LinkedHashMap<>());
         public volatile UUID designId;
+        /** Block-level designs for large problems, in order; status updated as they run. */
+        public final List<BlockRun> blocks = Collections.synchronizedList(new ArrayList<>());
 
         ProblemJob(UUID id, String notebook, String statement) {
             this.id = id;
@@ -185,6 +206,60 @@ public class ProblemService {
         UUID designId = designs.start(objective.toString(), null, iterations, job.notebook);
         job.designId = designId;
         return designId;
+    }
+
+    /**
+     * Large problems (an SoC) are designed block by block: the LLM lists the RTL blocks
+     * to implement and verify, each with its interface and test plan, and each block is
+     * one small design run, executed one after another so they never compete.
+     */
+    public List<BlockRun> designBlocks(UUID problemId, int iterations) {
+        ProblemJob job = jobs.get(problemId);
+        if (job == null) {
+            throw new IllegalArgumentException("no problem " + problemId);
+        }
+        Blocks bl = chat.prompt()
+                .user(u -> u.text("""
+                        Design statement:
+                        {statement}
+
+                        List 4 to 8 RTL blocks that must be implemented and verified for this
+                        design, most essential first (e.g. a MAC unit, a systolic tile, a tiling
+                        controller, a DMA engine, an ECC wrapper, a watchdog). Integrated IP such
+                        as CPUs, PHYs or memory controllers is NOT a block to generate. For each
+                        block give a name and a spec of at most 120 words: function, exact ports
+                        with widths, parameters, and what the self-checking testbench must check.
+                        /no_think""")
+                        .param("statement", job.statement))
+                .call()
+                .entity(Blocks.class);
+        if (bl == null || bl.blocks() == null || bl.blocks().isEmpty()) {
+            throw new IllegalStateException("could not derive RTL blocks");
+        }
+        job.blocks.clear();
+        bl.blocks().stream().limit(8).forEach(b -> job.blocks.add(new BlockRun(strip(b.name()), strip(b.spec()))));
+        runner.submit(() -> {
+            for (BlockRun b : job.blocks) {
+                b.status = "RUNNING";
+                String objective = "Block '" + b.name + "' of: " + (job.title == null ? "the design" : job.title)
+                        + "\n\n" + b.spec;
+                b.designId = designs.start(objective, null, iterations, job.notebook);
+                while (true) {
+                    try {
+                        Thread.sleep(15_000);
+                    } catch (InterruptedException e) {
+                        Thread.currentThread().interrupt();
+                        return;
+                    }
+                    var st = designs.view(b.designId).map(v -> v.design().status().name()).orElse("FAILED");
+                    if (!"RUNNING".equals(st)) {
+                        b.status = st;
+                        break;
+                    }
+                }
+            }
+        });
+        return List.copyOf(job.blocks);
     }
 
     private void run(ProblemJob job, int perPart, String mode) throws Exception {

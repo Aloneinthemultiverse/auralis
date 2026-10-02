@@ -52,6 +52,19 @@ public class ProblemMcpTools {
         return "Design started.\nid: " + id + "\nPoll design_status.";
     }
 
+    @McpTool(name = "problem_design_blocks", description = """
+            For large designs (an SoC): derive the RTL blocks to implement and verify (each with
+            ports and a test plan) and design them one by one, grounded in the problem's
+            notebook. Returns the block list; follow each block's design with design_status.""")
+    public String designBlocks(@McpToolParam(description = "Problem id") String problemId,
+                               @McpToolParam(description = "Max iterations per block (default 3)", required = false)
+                               Integer iterations) {
+        var blocks = problems.designBlocks(UUID.fromString(problemId.strip()), iterations == null ? 3 : iterations);
+        StringBuilder sb = new StringBuilder("Designing " + blocks.size() + " blocks in order:\n");
+        blocks.forEach(b -> sb.append("- ").append(b.name).append(": ").append(b.spec).append('\n'));
+        return sb.append("\nPoll problem_status for each block's design id and status.").toString();
+    }
+
     private static String render(ProblemJob j) {
         StringBuilder sb = new StringBuilder("Problem: ").append(j.title == null ? j.statement : j.title)
                 .append("\nStatus: ").append(j.status).append(" — ").append(j.phase)
@@ -67,6 +80,11 @@ public class ProblemMcpTools {
         }
         if (j.designId != null) {
             sb.append("\n\nDesign: ").append(j.designId);
+        }
+        if (!j.blocks.isEmpty()) {
+            sb.append("\n\nBlocks:");
+            j.blocks.forEach(b -> sb.append("\n- ").append(b.name).append(" [").append(b.status).append("]")
+                    .append(b.designId == null ? "" : " design " + b.designId));
         }
         return sb.toString();
     }

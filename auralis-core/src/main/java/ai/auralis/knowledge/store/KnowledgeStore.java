@@ -19,9 +19,17 @@ import org.springframework.transaction.annotation.Transactional;
 public class KnowledgeStore {
 
     private final JdbcClient jdbc;
+    private final TurboVecClient turbovec;
+    private final boolean useTurbovec;
+    private final int candidatesFactor;
 
-    public KnowledgeStore(JdbcClient jdbc) {
+    public KnowledgeStore(JdbcClient jdbc, TurboVecClient turbovec,
+                          @org.springframework.beans.factory.annotation.Value("${auralis.vector.backend:turbovec}") String backend,
+                          @org.springframework.beans.factory.annotation.Value("${auralis.vector.candidates-factor:10}") int candidatesFactor) {
         this.jdbc = jdbc;
+        this.turbovec = turbovec;
+        this.useTurbovec = "turbovec".equalsIgnoreCase(backend);
+        this.candidatesFactor = Math.max(1, candidatesFactor);
     }
 
     public record NewChunk(String content, float[] embedding) {
@@ -48,13 +56,18 @@ public class KnowledgeStore {
                 VALUES (?, ?, ?, ?, ?)""")
                 .params(docId, title, sourceType, uri, contentHash)
                 .update();
+        List<Long> vecIds = new ArrayList<>(chunks.size());
         for (int i = 0; i < chunks.size(); i++) {
-            jdbc.sql("""
+            vecIds.add(jdbc.sql("""
                     INSERT INTO chunk (id, document_id, ordinal, content, embedding)
-                    VALUES (?, ?, ?, ?, ?::vector)""")
+                    VALUES (?, ?, ?, ?, ?::vector) RETURNING vec_id""")
                     .params(UUID.randomUUID(), docId, i, chunks.get(i).content(),
                             toVectorLiteral(chunks.get(i).embedding()))
-                    .update();
+                    .query(Long.class).single());
+        }
+        if (useTurbovec) {
+            // Inside the transaction: if the index refuses, the document is not half-stored.
+            turbovec.add(vecIds, chunks.stream().map(NewChunk::embedding).toList());
         }
         return docId;
     }
@@ -65,6 +78,74 @@ public class KnowledgeStore {
     }
 
     public List<ChunkHit> vectorSearch(float[] queryEmbedding, int limit, Scope scope) {
+        return useTurbovec ? turboSearch(queryEmbedding, limit, scope) : pgvectorSearch(queryEmbedding, limit, scope);
+    }
+
+    /**
+     * TurboVec (2-bit TurboQuant) proposes {@code limit × factor} candidates within the
+     * scope; Postgres re-scores exactly those against the full embeddings.
+     */
+    private List<ChunkHit> turboSearch(float[] queryEmbedding, int limit, Scope scope) {
+        List<Long> allow = null;
+        if (scope.namespace() != null || !scope.documentIds().isEmpty()) {
+            List<Object> p = new ArrayList<>(java.util.Arrays.asList(scope.params()));
+            allow = jdbc.sql("SELECT c.vec_id FROM chunk c WHERE true" + scope.sql())
+                    .params(p).query(Long.class).list();
+            if (allow.isEmpty()) {
+                return List.of();
+            }
+        }
+        List<Long> ids = turbovec.search(queryEmbedding, limit * candidatesFactor, allow);
+        if (ids.isEmpty()) {
+            return List.of();
+        }
+        String v = toVectorLiteral(queryEmbedding);
+        String csv = ids.stream().map(String::valueOf).collect(java.util.stream.Collectors.joining(","));
+        return jdbc.sql("""
+                SELECT c.id, c.document_id, d.title, c.ordinal, c.content,
+                       1 - (c.embedding <=> ?::vector) AS score
+                FROM chunk c JOIN source_document d ON d.id = c.document_id
+                WHERE c.vec_id = ANY(string_to_array(?, ',')::bigint[])
+                ORDER BY c.embedding <=> ?::vector
+                LIMIT ?""")
+                .params(v, csv, v, limit)
+                .query(KnowledgeStore::mapRow)
+                .list();
+    }
+
+    /** One-time / repair: (re)loads every chunk's embedding into TurboVec, calibrating first. */
+    public int reindexTurbovec() {
+        List<float[]> sample = jdbc.sql("SELECT embedding::text FROM chunk ORDER BY random() LIMIT 4000")
+                .query((rs, i) -> parseVector(rs.getString(1))).list();
+        if (!sample.isEmpty()) {
+            turbovec.calibrate(sample);
+        }
+        int total = 0;
+        long after = 0;
+        while (true) {
+            var rows = jdbc.sql("SELECT vec_id, embedding::text FROM chunk WHERE vec_id > ? ORDER BY vec_id LIMIT 500")
+                    .param(after)
+                    .query((rs, i) -> java.util.Map.entry(rs.getLong(1), parseVector(rs.getString(2)))).list();
+            if (rows.isEmpty()) {
+                return total;
+            }
+            turbovec.add(rows.stream().map(java.util.Map.Entry::getKey).toList(),
+                    rows.stream().map(java.util.Map.Entry::getValue).toList());
+            total += rows.size();
+            after = rows.getLast().getKey();
+        }
+    }
+
+    static float[] parseVector(String literal) {
+        String[] parts = literal.substring(1, literal.length() - 1).split(",");
+        float[] v = new float[parts.length];
+        for (int i = 0; i < parts.length; i++) {
+            v[i] = Float.parseFloat(parts[i]);
+        }
+        return v;
+    }
+
+    private List<ChunkHit> pgvectorSearch(float[] queryEmbedding, int limit, Scope scope) {
         String v = toVectorLiteral(queryEmbedding);
         List<Object> params = new ArrayList<>(List.of(v));
         params.addAll(java.util.Arrays.asList(scope.params())); // may contain nulls (unscoped)

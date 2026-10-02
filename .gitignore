@@ -37,3 +37,7 @@ vendor/laya-serve.log
 **/.ruff_cache/
 auralis-ui/node_modules/
 auralis-ui/dist/
+
+# TurboVec index data and venv
+vendor/turbovec-service/.venv/
+vendor/turbovec-service/data/

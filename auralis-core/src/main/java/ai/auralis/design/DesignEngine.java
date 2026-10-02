@@ -35,7 +35,7 @@ public class DesignEngine {
     private static final Logger log = LoggerFactory.getLogger(DesignEngine.class);
     private static final String SCOPE = "design";
     private static final int ALTERNATIVES = 3;
-    private static final int MAX_CONTEXT = 9000;
+    private static final int MAX_CONTEXT = 4500;
 
     private final DesignStore store;
     private final DesignAnalyst analyst;
@@ -233,7 +233,7 @@ public class DesignEngine {
         for (String q : queries) {
             sb.append("\n## ").append(q).append('\n');
             for (var e : retriever.retrieve(q, perPart, false, scope)) {
-                String text = e.content().length() > 700 ? e.content().substring(0, 700) + " …" : e.content();
+                String text = e.content().length() > 400 ? e.content().substring(0, 400) + " …" : e.content();
                 sb.append("- (").append(e.documentTitle()).append(") ").append(text.replace('\n', ' ')).append('\n');
             }
             if (sb.length() > MAX_CONTEXT) {
