@@ -15,6 +15,16 @@ export function ProblemPanel({ onNotebook, onDesign }: { onNotebook: (nb: string
   const [jobId, setJobId] = useState<string | null>(() => sessionStorage.getItem('auralis.problem'))
   const [job, setJob] = useState<ProblemJob | null>(null)
 
+  const [all, setAll] = useState<ProblemJob[]>([])
+  useEffect(() => {
+    const load = () => fetch('/api/problems').then(r => r.json()).then((list: ProblemJob[]) => {
+      setAll(list)
+      // Follow the newest problem when none is chosen (e.g. one started from Claude via MCP).
+      if (!jobId && list.length) setJobId(list[list.length - 1].id)
+    }).catch(() => {})
+    load(); const t = window.setInterval(load, 15000); return () => window.clearInterval(t)
+  }, [jobId])
+
   useEffect(() => {
     if (!jobId) return
     const load = () => fetch(`/api/problems/${jobId}`).then(r => r.ok ? r.json() : null).then(j => j && setJob(j)).catch(() => {})
@@ -54,6 +64,12 @@ export function ProblemPanel({ onNotebook, onDesign }: { onNotebook: (nb: string
         </div>
       </div>
 
+      {all.length > 1 && (
+        <select className="input" value={jobId ?? ''} aria-label="Problem"
+          onChange={e => { setJobId(e.target.value); const j = all.find(x => x.id === e.target.value); if (j) onNotebook(j.notebook) }}>
+          {all.map(p => <option key={p.id} value={p.id}>{(p.title ?? p.statement).slice(0, 70)} — {p.status}</option>)}
+        </select>
+      )}
       {job && (
         <div className="card" style={{ display: 'grid', gap: 8 }}>
           <div className="row"><b style={{ flex: 1 }}>{job.title ?? 'Breaking down…'}</b><span className={`status ${job.status === 'READY' ? 'VERIFIED' : job.status}`}>{job.status}</span></div>
