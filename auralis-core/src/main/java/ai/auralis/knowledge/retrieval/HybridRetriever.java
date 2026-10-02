@@ -33,13 +33,17 @@ public class HybridRetriever {
     }
 
     public List<Evidence> retrieve(String query, int topK, boolean rerank) {
+        return retrieve(query, topK, rerank, Scope.ALL);
+    }
+
+    public List<Evidence> retrieve(String query, int topK, boolean rerank, Scope scope) {
         int n = cfg.candidatesPerRetriever();
         List<ChunkHit> vector;
         List<ChunkHit> keyword;
         try (var pool = Executors.newVirtualThreadPerTaskExecutor()) {
             var v = CompletableFuture.supplyAsync(
-                    () -> store.vectorSearch(embedder.embedQuery(query), n), pool);
-            var k = CompletableFuture.supplyAsync(() -> store.keywordSearch(query, n), pool);
+                    () -> store.vectorSearch(embedder.embedQuery(query), n, scope), pool);
+            var k = CompletableFuture.supplyAsync(() -> store.keywordSearch(query, n, scope), pool);
             vector = v.join();
             keyword = k.join();
         }

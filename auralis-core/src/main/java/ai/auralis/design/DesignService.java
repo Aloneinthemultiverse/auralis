@@ -50,7 +50,12 @@ public class DesignService {
     }
 
     public UUID start(String objective, UUID researchSessionId, int maxIterations) {
-        UUID id = store.create(objective, researchSessionId, maxIterations);
+        return start(objective, researchSessionId, maxIterations, null);
+    }
+
+    /** @param notebook a notebook whose sources ground the design (e.g. a problem's), or null */
+    public UUID start(String objective, UUID researchSessionId, int maxIterations, String notebook) {
+        UUID id = store.create(objective, researchSessionId, maxIterations, notebook);
         runner.submit(() -> engine.run(id));
         return id;
     }

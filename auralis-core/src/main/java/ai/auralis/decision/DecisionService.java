@@ -27,6 +27,10 @@ public class DecisionService {
     private static final String YES = "yes";
     private static final String NO = "no";
     private static final int MAX_LAYA_STATE = 2400;
+    private static final int LAYA_BATCH = 16;
+
+    /** Items the last subset selection could not get a Laya verdict for (thread-confined use). */
+    private volatile int lastUnavailable;
 
     public enum Policy {
         /** Laya decides alone. For decisions Laya is reliable at, or bulk/latency-bound ones. */
@@ -146,16 +150,25 @@ public class DecisionService {
         }
         List<String> names = List.copyOf(items.keySet());
         Map<String, Double> p = new LinkedHashMap<>();
-        try {
-            var states = names.stream().map(n -> n + ": " + items.get(n)).toList();
-            var answers = laya.decideBatch(states, Map.of("d", LayaQuestion.yesNo(question)));
-            for (int i = 0; i < names.size(); i++) {
-                p.put(names.get(i), answers.get(i).get("d").yesProbability());
+        // Laya on CPU needs ~1-2 s per item: decide in small batches so no request times
+        // out, and degrade per batch (neutral 0.5, flagged) instead of for the whole set.
+        int unavailable = 0;
+        for (int from = 0; from < names.size(); from += LAYA_BATCH) {
+            List<String> batch = names.subList(from, Math.min(names.size(), from + LAYA_BATCH));
+            try {
+                var states = batch.stream().map(n -> n + ": " + items.get(n)).toList();
+                var answers = laya.decideBatch(states, Map.of("d", LayaQuestion.yesNo(question)));
+                for (int i = 0; i < batch.size(); i++) {
+                    p.put(batch.get(i), answers.get(i).get("d").yesProbability());
+                }
+            } catch (Exception ex) {
+                unavailable += batch.size();
+                batch.forEach(n -> p.put(n, 0.5));
+                log.warn("Laya unavailable for part of {} ({} items, neutral 0.5): {}",
+                        kind, batch.size(), ex.toString());
             }
-        } catch (Exception ex) {
-            log.warn("Laya unavailable for {}: keeping all items ({})", kind, ex.toString());
-            names.forEach(n -> p.put(n, 1.0));
         }
+        lastUnavailable = unavailable;
         List<String> kept = p.entrySet().stream().filter(e -> e.getValue() >= threshold)
                 .map(Map.Entry::getKey).toList();
         if (kept.size() < minKeep) {
@@ -172,6 +185,11 @@ public class DecisionService {
         Map<String, Double> out = new LinkedHashMap<>();
         kept.forEach(k -> out.put(k, p.get(k)));
         return out;
+    }
+
+    /** How many items of the most recent subset selection Laya could not judge. */
+    public int lastUnavailable() {
+        return lastUnavailable;
     }
 
     /** Laya's vote, or null when Laya is unavailable (the decision then falls to the LLM). */

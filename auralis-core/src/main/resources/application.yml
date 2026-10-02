@@ -8,6 +8,9 @@ spring:
     url: jdbc:postgresql://localhost:5433/auralis
     username: auralis
     password: auralis
+    hikari:
+      # pgvector >= 0.8: keep scanning the HNSW graph until filtered (scoped) queries fill LIMIT.
+      connection-init-sql: SET hnsw.iterative_scan = relaxed_order
   servlet:
     multipart:
       max-file-size: 100MB

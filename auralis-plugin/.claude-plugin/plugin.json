@@ -1,7 +1,7 @@
 {
   "name": "auralis",
-  "version": "0.1.0",
-  "description": "Auralis AI Engineering Scientist: evidence-gated engineering research, a hybrid-RAG engineering knowledge base, and the Laya fast decision model, as tools for Claude.",
+  "version": "0.2.0",
+  "description": "Auralis AI Engineering Scientist: problem → parts → sources per part → NotebookLM-style grounded research → design and verify, with the Laya decision model controlling every step.",
   "author": { "name": "Sujit Narrayan M" },
   "keywords": ["engineering", "research", "rag", "mcp", "laya"]
 }

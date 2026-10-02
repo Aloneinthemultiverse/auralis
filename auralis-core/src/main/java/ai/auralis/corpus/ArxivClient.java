@@ -80,7 +80,7 @@ public class ArxivClient {
                     published.length() >= 4 ? Integer.parseInt(published.substring(0, 4)) : null,
                     "https://arxiv.org/abs/" + arxivId,
                     pdf != null ? pdf : "https://arxiv.org/pdf/" + arxivId,
-                    "arXiv (free to read)", "arxiv", topic, 0, null, List.of()));
+                    "arXiv (free to read)", "arxiv", topic, 0, null, List.of(), List.of()));
         }
         return out;
     }

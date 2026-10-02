@@ -35,7 +35,7 @@ public class DesignEngine {
     private static final Logger log = LoggerFactory.getLogger(DesignEngine.class);
     private static final String SCOPE = "design";
     private static final int ALTERNATIVES = 3;
-    private static final int MAX_CONTEXT = 6000;
+    private static final int MAX_CONTEXT = 9000;
 
     private final DesignStore store;
     private final DesignAnalyst analyst;
@@ -44,10 +44,14 @@ public class DesignEngine {
     private final ai.auralis.tools.ToolRegistry tools;
     private final ResearchStore researchStore;
     private final ResearchEngine research;
+    private final ai.auralis.graph.GraphStore graph;
+    private final ai.auralis.knowledge.retrieval.HybridRetriever retriever;
 
     public DesignEngine(DesignStore store, DesignAnalyst analyst, AdapterRegistry adapters,
                         DecisionService decisions, ai.auralis.tools.ToolRegistry tools,
-                        ResearchStore researchStore, ResearchEngine research) {
+                        ResearchStore researchStore, ResearchEngine research,
+                        ai.auralis.graph.GraphStore graph,
+                        ai.auralis.knowledge.retrieval.HybridRetriever retriever) {
         this.store = store;
         this.analyst = analyst;
         this.adapters = adapters;
@@ -55,13 +59,16 @@ public class DesignEngine {
         this.tools = tools;
         this.researchStore = researchStore;
         this.research = research;
+        this.graph = graph;
+        this.retriever = retriever;
     }
 
     /** A full design run from the objective. */
     public void run(UUID designId) {
         var design = store.design(designId).orElseThrow();
         try {
-            String context = researchContext(design.researchSessionId());
+            String context = researchContext(design.researchSessionId())
+                    + notebookContext(designId, design.notebook());
             Requirements req = analyst.requirements(design.objective(), context);
             String reqText = req.render();
             store.event(designId, 0, "REQUIREMENTS", count(req.functional()) + " functional, "
@@ -206,6 +213,36 @@ public class DesignEngine {
         research.run(session);
         return researchStore.session(session).map(s -> s.report() == null ? "(no report)" : s.report())
                 .orElse("(research failed)");
+    }
+
+    /**
+     * Evidence from the design's notebook, gathered part by part: for each PART of
+     * a problem notebook, its best passages; otherwise the notebook as a whole.
+     */
+    private String notebookContext(UUID designId, String notebook) {
+        if (notebook == null) {
+            return "";
+        }
+        var scope = ai.auralis.knowledge.retrieval.Scope.of(notebook, null);
+        List<String> queries = graph.byKind(notebook, "PART").stream().map(n -> n.name()).toList();
+        if (queries.isEmpty()) {
+            queries = List.of(store.design(designId).map(d -> d.objective()).orElse(""));
+        }
+        StringBuilder sb = new StringBuilder("\n\nEvidence from the notebook's sources, by part:\n");
+        int perPart = Math.max(2, 8 / Math.max(1, queries.size()));
+        for (String q : queries) {
+            sb.append("\n## ").append(q).append('\n');
+            for (var e : retriever.retrieve(q, perPart, false, scope)) {
+                String text = e.content().length() > 700 ? e.content().substring(0, 700) + " …" : e.content();
+                sb.append("- (").append(e.documentTitle()).append(") ").append(text.replace('\n', ' ')).append('\n');
+            }
+            if (sb.length() > MAX_CONTEXT) {
+                break;
+            }
+        }
+        store.event(designId, 0, "EVIDENCE", "grounded in notebook " + notebook + " across "
+                + queries.size() + " part(s)");
+        return sb.length() <= MAX_CONTEXT ? sb.toString() : sb.substring(0, MAX_CONTEXT);
     }
 
     private String researchContext(UUID sessionId) {

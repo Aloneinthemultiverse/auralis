@@ -1,11 +1,14 @@
 package ai.auralis.knowledge.store;
 
+import java.util.ArrayList;
 import java.util.List;
 import java.util.Optional;
 import java.util.UUID;
 
 import org.springframework.jdbc.core.simple.JdbcClient;
 import org.springframework.stereotype.Repository;
+
+import ai.auralis.knowledge.retrieval.Scope;
 import org.springframework.transaction.annotation.Transactional;
 
 /**
@@ -58,13 +61,24 @@ public class KnowledgeStore {
 
     /** Nearest chunks by cosine distance; rawScore is cosine similarity. */
     public List<ChunkHit> vectorSearch(float[] queryEmbedding, int limit) {
+        return vectorSearch(queryEmbedding, limit, Scope.ALL);
+    }
+
+    public List<ChunkHit> vectorSearch(float[] queryEmbedding, int limit, Scope scope) {
+        String v = toVectorLiteral(queryEmbedding);
+        List<Object> params = new ArrayList<>(List.of(v));
+        params.addAll(List.of(scope.params()));
+        params.add(v);
+        params.add(limit);
         return jdbc.sql("""
                 SELECT c.id, c.document_id, d.title, c.ordinal, c.content,
                        1 - (c.embedding <=> ?::vector) AS score
                 FROM chunk c JOIN source_document d ON d.id = c.document_id
+                WHERE true""" + scope.sql() + """
+
                 ORDER BY c.embedding <=> ?::vector
                 LIMIT ?""")
-                .params(toVectorLiteral(queryEmbedding), toVectorLiteral(queryEmbedding), limit)
+                .params(params)
                 .query(KnowledgeStore::mapRow)
                 .list();
     }
@@ -76,15 +90,23 @@ public class KnowledgeStore {
      * cover-density ranking rewards chunks matching more terms close together.
      */
     public List<ChunkHit> keywordSearch(String query, int limit) {
+        return keywordSearch(query, limit, Scope.ALL);
+    }
+
+    public List<ChunkHit> keywordSearch(String query, int limit, Scope scope) {
+        List<Object> params = new ArrayList<>(List.of(query));
+        params.addAll(List.of(scope.params()));
+        params.add(limit);
         return jdbc.sql("""
                 SELECT c.id, c.document_id, d.title, c.ordinal, c.content,
                        ts_rank_cd(c.tsv, k.q, 32) AS score
                 FROM chunk c JOIN source_document d ON d.id = c.document_id,
                      (SELECT NULLIF(replace(plainto_tsquery('english', ?)::text, '&', '|'), '')::tsquery AS q) k
-                WHERE c.tsv @@ k.q
+                WHERE c.tsv @@ k.q""" + scope.sql() + """
+
                 ORDER BY score DESC
                 LIMIT ?""")
-                .params(query, limit)
+                .params(params)
                 .query(KnowledgeStore::mapRow)
                 .list();
     }

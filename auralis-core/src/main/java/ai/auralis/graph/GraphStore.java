@@ -113,6 +113,12 @@ public class GraphStore {
                 .query(GraphStore::row).list();
     }
 
+    /** All nodes of one kind in a namespace, in creation order of their names. */
+    public List<Node> byKind(String namespace, String kind) {
+        return jdbc.sql("SELECT " + COLS + " FROM kg_node n WHERE n.namespace = ? AND n.kind = ? ORDER BY n.name")
+                .params(namespace, kind).query(GraphStore::row).list();
+    }
+
     public long count(String namespace) {
         return jdbc.sql("SELECT count(*) FROM kg_node WHERE namespace = ?")
                 .param(namespace).query(Long.class).single();

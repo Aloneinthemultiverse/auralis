@@ -17,7 +17,7 @@ public class DesignStore {
     public enum Status { RUNNING, VERIFIED, NEEDS_INPUT, EXHAUSTED, FAILED }
 
     public record Design(UUID id, String objective, UUID researchSessionId, Status status,
-                         int maxIterations, String error) {
+                         int maxIterations, String error, String notebook) {
     }
 
     public record Alternative(UUID id, String name, String summary, String pros, String cons,
@@ -40,24 +40,24 @@ public class DesignStore {
         this.json = json;
     }
 
-    public UUID create(String objective, UUID researchSessionId, int maxIterations) {
+    public UUID create(String objective, UUID researchSessionId, int maxIterations, String notebook) {
         UUID id = UUID.randomUUID();
         jdbc.sql("""
-                INSERT INTO design (id, objective, research_session_id, status, max_iterations)
-                VALUES (?, ?, ?, ?, ?)""")
-                .params(id, objective, researchSessionId, Status.RUNNING.name(), maxIterations)
+                INSERT INTO design (id, objective, research_session_id, status, max_iterations, notebook)
+                VALUES (?, ?, ?, ?, ?, ?)""")
+                .params(id, objective, researchSessionId, Status.RUNNING.name(), maxIterations, notebook)
                 .update();
         return id;
     }
 
     public Optional<Design> design(UUID id) {
         return jdbc.sql("""
-                SELECT id, objective, research_session_id, status, max_iterations, error
+                SELECT id, objective, research_session_id, status, max_iterations, error, notebook
                 FROM design WHERE id = ?""")
                 .param(id)
                 .query((rs, n) -> new Design(rs.getObject(1, UUID.class), rs.getString(2),
                         rs.getObject(3, UUID.class), Status.valueOf(rs.getString(4)),
-                        rs.getInt(5), rs.getString(6)))
+                        rs.getInt(5), rs.getString(6), rs.getString(7)))
                 .optional();
     }
 
