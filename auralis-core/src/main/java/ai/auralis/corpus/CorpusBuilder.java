@@ -340,8 +340,7 @@ public class CorpusBuilder {
                 Map<String, String> items = new LinkedHashMap<>();
                 files.forEach(f -> items.put(f.path(), repo + " " + f.path()));
                 Map<String, Double> keep = decisions.selectScored("corpus", job.id, "design_file_relevance",
-                        "Is this file useful knowledge about how this chip/processor/hardware design works "
-                                + "(architecture, microarchitecture, interfaces, RTL, verification)?",
+                        "Is this file about how the hardware design works?",
                         items, 0.4, Math.min(10, items.size()));
                 var repoId = graph.upsertNode(ns, "repo:" + repo, "DESIGN", repo, "https://github.com/" + repo,
                         null, json.writeValueAsString(Map.of("description", r.path("description").asString(""))));

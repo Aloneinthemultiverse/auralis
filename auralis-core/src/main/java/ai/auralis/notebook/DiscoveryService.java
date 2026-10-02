@@ -60,8 +60,10 @@ public class DiscoveryService {
 
     private static final Logger log = LoggerFactory.getLogger(DiscoveryService.class);
     private static final Pattern URL = Pattern.compile("https?://[^\\s\"'<>)\\]\\\\]+");
+    /** Engineering-wide arXiv categories: hardware, ML/AI, systems, signals, fluids, applied physics, robotics. */
     private static final List<String> ARXIV_CATS = List.of("cs.AR", "cs.LG", "cs.AI", "cs.ET",
-            "eess.SY", "eess.SP", "cs.DC", "physics.app-ph");
+            "eess.SY", "eess.SP", "cs.DC", "cs.RO", "physics.app-ph", "physics.flu-dyn",
+            "physics.chem-ph", "cond-mat.mtrl-sci", "math.OC");
 
     /** A source found for a notebook. kind: paper | web | pdf | repo */
     public record Found(String id, String kind, String title, String url, String pdfUrl, String summary,
@@ -102,6 +104,7 @@ public class DiscoveryService {
     }
 
     private final ArxivClient arxiv;
+    private final ai.auralis.corpus.NtrsClient ntrs;
     private final OpenAlexClient openAlex;
     private final WebSearchClient web;
     private final GitHubRepoSource github;
@@ -119,11 +122,12 @@ public class DiscoveryService {
     private final HttpClient http = HttpClient.newBuilder().followRedirects(HttpClient.Redirect.ALWAYS)
             .connectTimeout(Duration.ofSeconds(20)).build();
 
-    public DiscoveryService(ArxivClient arxiv, OpenAlexClient openAlex, WebSearchClient web,
+    public DiscoveryService(ArxivClient arxiv, ai.auralis.corpus.NtrsClient ntrs, OpenAlexClient openAlex, WebSearchClient web,
                             GitHubRepoSource github, DecisionService decisions, IngestionService ingestion,
                             GraphStore graph, LocalDeepResearch localDeep, KaggleDeepResearch kaggleDeep,
                             JsonMapper json, @Value("${GITHUB_TOKEN:}") String githubToken) {
         this.arxiv = arxiv;
+        this.ntrs = ntrs;
         this.openAlex = openAlex;
         this.web = web;
         this.github = github;
@@ -187,6 +191,7 @@ public class DiscoveryService {
             var fWeb = CompletableFuture.supplyAsync(() -> web.search(q, 20), pool);
             var fPdf = CompletableFuture.supplyAsync(() -> web.search(q + " filetype:pdf", 15), pool);
             var fRepo = CompletableFuture.supplyAsync(() -> safe(() -> repos(q)), pool);
+            var fNasa = CompletableFuture.supplyAsync(() -> safe(() -> ntrs.search(q, 20, 0)), pool);
 
             Map<String, Found> found = new LinkedHashMap<>();
             Set<String> titles = new LinkedHashSet<>();
@@ -210,6 +215,10 @@ public class DiscoveryService {
             }
             for (Found r : fRepo.join()) {
                 add(found, titles, r);
+            }
+            for (Candidate c : fNasa.join()) {
+                add(found, titles, new Found(c.key(), "report", c.title(), c.landingUrl(), c.pdfUrl(),
+                        c.abstractText(), "NASA NTRS", c.year(), 0, null));
             }
 
             if ("deep".equals(searchMode) || "deep-kaggle".equals(searchMode)) {
@@ -245,9 +254,9 @@ public class DiscoveryService {
                 job.sources = List.copyOf(found.values());
             }
             Map<String, String> items = new LinkedHashMap<>();
-            found.values().forEach(f -> items.put(f.id(), f.title() + ". " + trim(f.summary(), 300)));
+            found.values().forEach(f -> items.put(f.id(), f.title()));
             Map<String, Double> scores = decisions.selectScored("notebook", null, "source_relevance",
-                    "Is this source relevant to the research topic: " + q, items, 0.0, items.size());
+                    "Is this about " + q + "?", items, 0.0, items.size());
             List<Found> ranked = found.values().stream()
                     .map(f -> new Found(f.id(), f.kind(), f.title(), f.url(), f.pdfUrl(), trim(f.summary(), 600),
                             f.origin(), f.year(), f.citedBy(), scores.get(f.id())))
@@ -339,7 +348,8 @@ public class DiscoveryService {
         if (!Files.exists(file) || Files.size(file) == 0) {
             fetch(url, file);
         }
-        var r = ingestion.ingest(new FileSystemResource(file), f.title(), f.kind().equals("paper") ? "paper" : f.kind(),
+        var r = ingestion.ingest(new FileSystemResource(file), f.title(),
+                f.kind().equals("paper") || f.kind().equals("report") ? "paper" : f.kind(),
                 f.url());
         String props = json.writeValueAsString(Map.of("origin", f.origin(), "summary", trim(f.summary(), 500),
                 "year", f.year() == null ? "" : f.year().toString()));

@@ -28,16 +28,20 @@ public class GeneralAdapter implements DomainAdapter {
 
     @Override
     public String description() {
-        return "general engineering design without specialised tools: systems, mechanical, "
-                + "electrical, software or process design checked with a numerical model";
+        return "general engineering design checked with a numerical model: propulsion (rocket and "
+                + "jet engines, nozzles, combustion), thermal-fluid, mechanical, aerospace, energy, "
+                + "electrical, control, chemical or process systems";
     }
 
     @Override
     public String guidance() {
         return """
                 Besides the design description, provide a file `model.py`: a self-contained
-                Python model of the design (numpy/scipy allowed) that computes its key metrics
-                from the chosen parameters, checks each measurable requirement, and prints one
+                Python model of the design that computes its key metrics. Available libraries:
+                numpy, scipy, sympy, pandas, pint (units), CoolProp (fluid properties), cantera
+                (combustion and equilibrium chemistry), openmdao and pycycle (NASA gas-turbine /
+                propulsion cycle analysis). The model computes the metrics from the chosen
+                parameters, checks each measurable requirement, and prints one
                 line per requirement as `PASS <requirement>: <value>` or
                 `FAIL <requirement>: <value> (limit <limit>)`, then `OVERALL PASS` or
                 `OVERALL FAIL`.""";

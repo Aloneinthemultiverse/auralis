@@ -67,7 +67,7 @@ public class KnowledgeStore {
     public List<ChunkHit> vectorSearch(float[] queryEmbedding, int limit, Scope scope) {
         String v = toVectorLiteral(queryEmbedding);
         List<Object> params = new ArrayList<>(List.of(v));
-        params.addAll(List.of(scope.params()));
+        params.addAll(java.util.Arrays.asList(scope.params())); // may contain nulls (unscoped)
         params.add(v);
         params.add(limit);
         return jdbc.sql("""
@@ -95,7 +95,7 @@ public class KnowledgeStore {
 
     public List<ChunkHit> keywordSearch(String query, int limit, Scope scope) {
         List<Object> params = new ArrayList<>(List.of(query));
-        params.addAll(List.of(scope.params()));
+        params.addAll(java.util.Arrays.asList(scope.params())); // may contain nulls (unscoped)
         params.add(limit);
         return jdbc.sql("""
                 SELECT c.id, c.document_id, d.title, c.ordinal, c.content,
