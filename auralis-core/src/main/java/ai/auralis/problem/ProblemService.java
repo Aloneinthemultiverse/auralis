@@ -216,15 +216,21 @@ public class ProblemService {
                 }
             }
             pp.found = pool.size();
-            List<Found> keep = pool.values().stream()
-                    .filter(f -> f.relevance() != null && f.relevance() >= 0.55)
+            // Laya's ranking matters more than its absolute score (specific questions score
+            // lower overall), so take the best-ranked sources above a low junk floor, and walk
+            // further down the ranking when a download fails so the part still gets `need`.
+            List<Found> ranked = pool.values().stream()
+                    .filter(f -> f.relevance() != null && f.relevance() >= 0.3)
                     .sorted((x, y) -> Double.compare(y.relevance(), x.relevance()))
-                    .limit(need).toList();
-            pp.kept = keep.size();
+                    .toList();
+            pp.kept = Math.min(need, ranked.size());
 
-            // 3. Import the kept sources under this part.
+            // 3. Import the best sources under this part until `need` succeed.
             pp.status = "importing";
-            for (Found f : keep) {
+            for (Found f : ranked) {
+                if (pp.imported >= need) {
+                    break;
+                }
                 try {
                     discovery.importOne(job.notebook, partNode, f);
                     pp.imported++;
