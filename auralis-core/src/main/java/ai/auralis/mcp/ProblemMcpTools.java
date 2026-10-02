@@ -14,9 +14,24 @@ import ai.auralis.problem.ProblemService.ProblemJob;
 public class ProblemMcpTools {
 
     private final ProblemService problems;
+    private final ai.auralis.problem.KaggleDesignService kaggle;
 
-    public ProblemMcpTools(ProblemService problems) {
+    public ProblemMcpTools(ProblemService problems, ai.auralis.problem.KaggleDesignService kaggle) {
         this.problems = problems;
+        this.kaggle = kaggle;
+    }
+
+    @McpTool(name = "problem_design_kaggle", description = """
+            Design a READY problem block by block on a free Kaggle GPU with a large coding model
+            (Qwen2.5-Coder-32B): derives the RTL blocks, then for each loops generate -> Verilator
+            lint -> Icarus simulation -> Yosys synthesis -> fix. Results are imported into Auralis
+            automatically (designs with versions, files, EDA reports, Laya verdicts). Takes
+            ~15 min to boot plus minutes per block; poll problem_status.""")
+    public String designOnKaggle(@McpToolParam(description = "Problem id") String problemId,
+                                 @McpToolParam(description = "Max RTL blocks 1-10 (default 6)", required = false) Integer maxBlocks,
+                                 @McpToolParam(description = "Max fix iterations per block 1-8 (default 4)", required = false) Integer iterations) {
+        kaggle.start(UUID.fromString(problemId.strip()), maxBlocks == null ? 6 : maxBlocks, iterations == null ? 4 : iterations);
+        return "Kaggle design started for problem " + problemId + ". Poll problem_status.";
     }
 
     @McpTool(name = "problem_start", description = """

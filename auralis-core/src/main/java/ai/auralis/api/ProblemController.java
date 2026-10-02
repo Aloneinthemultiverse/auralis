@@ -23,9 +23,22 @@ import ai.auralis.problem.ProblemService.ProblemJob;
 public class ProblemController {
 
     private final ProblemService problems;
+    private final ai.auralis.problem.KaggleDesignService kaggle;
 
-    public ProblemController(ProblemService problems) {
+    public ProblemController(ProblemService problems, ai.auralis.problem.KaggleDesignService kaggle) {
         this.problems = problems;
+        this.kaggle = kaggle;
+    }
+
+    public record KaggleRequest(Integer maxBlocks, Integer iterations) {
+    }
+
+    /** Block-by-block RTL design on a free Kaggle GPU with a large model; imported automatically. */
+    @PostMapping("/{id}/design-kaggle")
+    public Map<String, Object> designOnKaggle(@PathVariable UUID id, @RequestBody(required = false) KaggleRequest req) {
+        int blocks = req == null || req.maxBlocks() == null ? 6 : Math.max(1, Math.min(10, req.maxBlocks()));
+        int it = req == null || req.iterations() == null ? 4 : Math.max(1, Math.min(8, req.iterations()));
+        return Map.of("problem", kaggle.start(id, blocks, it).id, "blocks", blocks, "iterations", it);
     }
 
     public record StartRequest(@NotBlank String statement, Integer sourcesPerPart, String mode) {
