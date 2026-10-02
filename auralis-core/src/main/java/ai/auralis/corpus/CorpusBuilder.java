@@ -66,6 +66,8 @@ public class CorpusBuilder {
         public final Instant started = Instant.now();
         public volatile String status = "RUNNING";
         public volatile String phase = "starting";
+        /** Set by {@link CorpusBuilder#stop}; the build stops at the next item. */
+        public volatile boolean stopRequested;
         public final AtomicInteger discovered = new AtomicInteger();
         public final AtomicInteger kept = new AtomicInteger();
         public final AtomicInteger ingested = new AtomicInteger();
@@ -141,6 +143,28 @@ public class CorpusBuilder {
             }
         });
         return job;
+    }
+
+    /** Pauses a running build at its next item (everything ingested so far is kept). */
+    public boolean stop(UUID id) {
+        Job j = jobs.get(id);
+        if (j == null || !"RUNNING".equals(j.status)) {
+            return false;
+        }
+        j.stopRequested = true;
+        return true;
+    }
+
+    /** Pauses every running build, e.g. to give a design run the whole machine. */
+    public int stopAll() {
+        int n = 0;
+        for (Job j : jobs.values()) {
+            if ("RUNNING".equals(j.status)) {
+                j.stopRequested = true;
+                n++;
+            }
+        }
+        return n;
     }
 
     public Optional<Job> job(UUID id) {
@@ -482,6 +506,9 @@ public class CorpusBuilder {
 
     /** Downloads and ingests one work; returns its graph node, or null if it was skipped. */
     private UUID ingest(Job job, String ns, UUID topicId, Candidate c, Path cacheDir) {
+        if (job.stopRequested) {
+            throw new ai.auralis.knowledge.StorageGuard.StorageFullException("paused by request");
+        }
         storage.check(); // a full disk stops the build instead of failing every item
         try {
             Path file = cacheDir.resolve(c.key().replaceAll("[^A-Za-z0-9._-]", "_") + ".pdf");

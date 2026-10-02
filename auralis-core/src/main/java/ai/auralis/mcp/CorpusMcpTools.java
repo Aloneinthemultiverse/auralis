@@ -44,6 +44,14 @@ public class CorpusMcpTools {
                 + "\nPoll corpus_status; browse with graph_browse namespace " + job.namespace + ".";
     }
 
+    @McpTool(name = "corpus_stop", description = """
+            Pause all running corpus builds (they stop at the next item; everything already
+            ingested is kept). Use it to give a design run the whole machine; restart later
+            with corpus_build — downloads are cached and duplicates are skipped.""")
+    public String stop() {
+        return builder.stopAll() + " corpus build(s) pausing.";
+    }
+
     @McpTool(name = "corpus_status", description = "Progress of corpus builds (all, or one job).")
     public String status(@McpToolParam(description = "Job id (default: all jobs)", required = false)
                          String jobId) {

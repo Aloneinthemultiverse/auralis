@@ -22,9 +22,11 @@ import ai.auralis.mcp.CorpusMcpTools;
 public class CorpusController {
 
     private final CorpusMcpTools corpus;
+    private final ai.auralis.corpus.CorpusBuilder builder;
 
-    public CorpusController(CorpusMcpTools corpus) {
+    public CorpusController(CorpusMcpTools corpus, ai.auralis.corpus.CorpusBuilder builder) {
         this.corpus = corpus;
+        this.builder = builder;
     }
 
     public record BuildRequest(@NotBlank String manifest, Integer topicLimit) {
@@ -36,6 +38,11 @@ public class CorpusController {
             return ResponseEntity.badRequest().body("not a file: " + req.manifest());
         }
         return ResponseEntity.accepted().body(corpus.build(req.manifest(), req.topicLimit()));
+    }
+
+    @PostMapping("/stop")
+    public String stopAll() {
+        return builder.stopAll() + " corpus build(s) pausing; they stop at the next item.";
     }
 
     @GetMapping("/jobs")
