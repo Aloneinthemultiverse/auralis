@@ -38,6 +38,12 @@ export function ProblemPanel({ onNotebook, onDesign }: { onNotebook: (nb: string
     onNotebook(r.notebook)
   }
 
+  const designKaggle = async () => {
+    if (!job) return
+    await fetch(`/api/problems/${job.id}/design-kaggle`, { method: 'POST', headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ maxBlocks: 6, iterations: 4 }) })
+  }
+
   const design = async () => {
     if (!job) return
     const r = await fetch(`/api/problems/${job.id}/design`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: '{}' }).then(r => r.json())
@@ -94,7 +100,24 @@ export function ProblemPanel({ onNotebook, onDesign }: { onNotebook: (nb: string
               </details>
             )
           })}
-          {job.status === 'READY' && !job.designId && <button className="btn primary" onClick={design}>Design from this evidence</button>}
+          {job.status === 'READY' && (
+            <div className="row" style={{ flexWrap: 'wrap' }}>
+              {!job.designId && <button className="btn" onClick={design}>Design locally (small model)</button>}
+              <button className="btn primary" onClick={designKaggle}>Design on Kaggle GPU (32B model)</button>
+            </div>
+          )}
+          {(job as any).blocks?.length > 0 && (
+            <div className="card small">
+              <b>Blocks</b>
+              {(job as any).blocks.map((b: any) => (
+                <div key={b.name} className="row" style={{ marginTop: 4 }}>
+                  <span className={`status ${b.status}`}>{b.status}</span>
+                  <span style={{ flex: 1 }}>{b.name}</span>
+                  {b.designId && <button className="btn small" onClick={() => onDesign(b.designId)}>Open</button>}
+                </div>
+              ))}
+            </div>
+          )}
           {job.designId && <button className="btn" onClick={() => onDesign(job.designId!)}>Open design run</button>}
         </div>
       )}
