@@ -69,10 +69,11 @@ public class AdapterRegistry {
             return adapters.getFirst();
         }
         Map<String, String> options = new LinkedHashMap<>();
-        adapters.forEach(a -> options.put(a.name(), a.description()));
+        adapters.forEach(a -> options.put(a.name(), a.label()));
+        // Laya first; below 0.8 the LLM decides (Laya's vote stays in the ledger).
         var d = decisions.decide(Spec.choice("design", designId, "domain_routing",
-                Policy.LAYA_THEN_LLM, "Which engineering domain does this objective belong to?",
-                options, objective));
+                Policy.LAYA_THEN_LLM, "Which engineering domain is this?", options, objective)
+                .withMinConfidence(0.8));
         return adapters.stream().filter(a -> a.name().equals(d.answer())).findFirst()
                 .orElse(general);
     }

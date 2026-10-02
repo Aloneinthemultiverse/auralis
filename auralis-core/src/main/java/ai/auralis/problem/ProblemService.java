@@ -112,6 +112,34 @@ public class ProblemService {
         this.json = json;
     }
 
+    /** Reloads persisted problems so READY ones can still be designed after a restart. */
+    @org.springframework.context.event.EventListener(org.springframework.boot.context.event.ApplicationReadyEvent.class)
+    void reload() {
+        jdbc.sql("UPDATE problem SET status = 'FAILED', error = 'interrupted by server restart' "
+                + "WHERE status IN ('DECOMPOSING', 'COLLECTING')").update();
+        jdbc.sql("SELECT id, notebook, statement, title, status, breakdown::text FROM problem ORDER BY created_at")
+                .query((rs, i) -> {
+                    ProblemJob j = new ProblemJob(rs.getObject(1, UUID.class), rs.getString(2), rs.getString(3));
+                    j.title = rs.getString(4);
+                    j.status = rs.getString(5);
+                    j.phase = "READY".equals(j.status) ? "ready to design — every part has its sources"
+                            : "interrupted by a server restart; start it again";
+                    String b = rs.getString(6);
+                    if (b != null) {
+                        j.breakdown = json.readValue(b, Breakdown.class);
+                        j.breakdown.parts().forEach(p -> {
+                            PartProgress pp = new PartProgress(p.name());
+                            pp.status = "READY".equals(j.status) ? "done" : "interrupted";
+                            j.parts.put(p.name(), pp);
+                        });
+                    }
+                    return j;
+                }).list().forEach(j -> jobs.put(j.id, j));
+        if (!jobs.isEmpty()) {
+            log.info("reloaded {} problem(s)", jobs.size());
+        }
+    }
+
     public ProblemJob start(String statement, int sourcesPerPart, String mode) {
         String working = statement.length() > 60 ? statement.substring(0, 60) + "…" : statement;
         String notebook = discovery.createNotebook("Problem: " + working);

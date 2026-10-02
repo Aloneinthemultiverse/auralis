@@ -34,6 +34,11 @@ public class GeneralAdapter implements DomainAdapter {
     }
 
     @Override
+    public String label() {
+        return "other engineering";
+    }
+
+    @Override
     public String guidance() {
         return """
                 Besides the design description, provide a file `model.py`: a self-contained
