@@ -1,0 +1,6 @@
+use_default_settings: true
+server:
+  secret_key: "auralis-local-only-change-me"
+  limiter: false
+search:
+  formats: [html, json]

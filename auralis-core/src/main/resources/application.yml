@@ -1,0 +1,70 @@
+spring:
+  application:
+    name: auralis-core
+  threads:
+    virtual:
+      enabled: true
+  datasource:
+    url: jdbc:postgresql://localhost:5433/auralis
+    username: auralis
+    password: auralis
+  servlet:
+    multipart:
+      max-file-size: 100MB
+      max-request-size: 100MB
+  ai:
+    mcp:
+      server:
+        name: auralis
+        version: 0.1.0
+        protocol: STREAMABLE
+        instructions: >
+          Auralis is an AI engineering scientist. Use knowledge_search for evidence
+          from ingested engineering documents, research_start to investigate an
+          engineering objective (iterative, evidence-gated), and research_status to
+          follow a session and read its cited report.
+        streamable-http:
+          mcp-endpoint: /mcp
+    ollama:
+      base-url: http://localhost:11434
+      chat:
+        options:
+          model: auralis-qwen3
+          temperature: 0.3
+      embedding:
+        options:
+          model: nomic-embed-text
+
+auralis:
+  embedding:
+    dimensions: 768
+    batch-size: 32
+  chunking:
+    target-chars: 1600
+    overlap-chars: 200
+  retrieval:
+    candidates-per-retriever: 30
+    rrf-k: 60
+    rerank-top-n: 8
+  laya:
+    base-url: http://localhost:8000
+    timeout: 60s
+  research:
+    max-rounds: 3
+    max-questions-per-round: 5
+    evidence-per-question: 5
+    sufficient-threshold: 0.6
+  deep-research:
+    agent-harness-dir: ../vendor/AgentHarness
+    python: .venv/Scripts/python.exe
+    local-timeout: 45m
+    kaggle-dir: ../kaggle
+    bash: C:/Program Files/Git/usr/bin/bash.exe
+    kaggle-timeout: 3h
+    max-turns: 30
+
+management:
+  endpoints:
+    web:
+      exposure:
+        include: health,info

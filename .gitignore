@@ -1,0 +1,37 @@
+# Build output
+auralis-core/target/
+**/__pycache__/
+*.pyc
+
+# Local runtime state
+logs/
+*.log
+core.log
+kaggle/out/
+kaggle/research-worker/build/
+kaggle/agentharness-dataset/
+kaggle/test_questions.json
+kaggle/worker_run.log
+
+# Python environments and caches (recreate with uv)
+**/.venv/
+vendor/AgentHarness/data/
+vendor/AgentHarness/benchmarks/datasets/
+
+# Secrets and machine-local config — never commit
+.env
+**/.env
+!**/.env.example
+kaggle.json
+
+# Test scratch output
+vendor/local_test.json
+vendor/local_test.log
+vendor/laya-serve.log
+
+# IDE
+.idea/
+.vscode/
+*.iml
+.ruff_cache/
+**/.ruff_cache/

@@ -1,0 +1,33 @@
+services:
+  postgres:
+    image: pgvector/pgvector:pg17
+    container_name: auralis-postgres
+    environment:
+      POSTGRES_DB: auralis
+      POSTGRES_USER: auralis
+      POSTGRES_PASSWORD: auralis
+    ports:
+      - "5433:5432"
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U auralis"]
+      interval: 5s
+      retries: 10
+
+  redis:
+    image: redis:7-alpine
+    container_name: auralis-redis
+    ports:
+      - "6379:6379"
+
+  searxng:
+    image: searxng/searxng:latest
+    container_name: auralis-searxng
+    ports:
+      - "8888:8080"
+    volumes:
+      - ./infra/searxng/settings.yml:/etc/searxng/settings.yml:ro
+
+volumes:
+  pgdata:

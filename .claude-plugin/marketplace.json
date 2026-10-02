@@ -1,0 +1,14 @@
+{
+  "name": "auralis-local",
+  "owner": { "name": "Sujit Narrayan M" },
+  "metadata": {
+    "description": "Local marketplace for the Auralis AI Engineering Scientist plugin."
+  },
+  "plugins": [
+    {
+      "name": "auralis",
+      "source": "./auralis-plugin",
+      "description": "Auralis AI Engineering Scientist tools (knowledge base + research loop) over MCP."
+    }
+  ]
+}

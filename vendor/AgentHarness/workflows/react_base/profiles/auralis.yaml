@@ -1,0 +1,23 @@
+# react_base — Auralis profile
+#
+# Sized for free hardware (local Ollama or Kaggle T4 + vLLM): shorter
+# turn budget and context window, last-5 tool-result compaction.
+
+llm:
+  model: ${OPENAI_MODEL}
+  api_key: ${OPENAI_API_KEY}
+  base_url: ${OPENAI_BASE_URL}
+  temperature: 0.7
+  top_p: 0.95
+  repetition_penalty: 1.05
+  max_tokens: 4096
+
+agent:
+  main_max_turns: ${AURALIS_MAX_TURNS:-40}
+  keep_tool_result: 5
+  tool_result_max_chars: 20000
+  tool_timeout_s: 300
+  llm_timeout_s: 600
+  max_input_tokens: ${AURALIS_MAX_INPUT_TOKENS:-32768}
+  thinking_format: tag
+  thinking_in_history: false
