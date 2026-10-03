@@ -25,11 +25,22 @@ class RatedRetrieverTest {
 
     @Test
     void expansionAddsFrequentUnseenEvidenceTerms() {
-        var rounds = List.of(new RatedRetriever.Round(1, "power gating", "REFINE", 0.6));
+        var rounds = List.of(new RatedRetriever.Round(1, "power gating", "REFINE", 0.6, 0.5));
         String q = RatedRetriever.expand("power gating", rounds, List.of(
                 ev("a", "isolation retention isolation switch power"),
                 ev("b", "retention isolation acknowledge gating")));
         assertThat(q).startsWith("power gating ").contains("isolation", "retention");
         assertThat(q.substring("power gating".length())).doesNotContain("power", "gating");
+    }
+
+    @Test
+    void coverageRejectsOffTopicSourcesForLongQueries() {
+        String q = "8b/10b running disparity comma K28.5 64b/66b sync header block lock scrambler";
+        double off = RatedRetriever.coverage(q, List.of(ev("TCP-SYN scan detection", "packet flow hashing on FPGA"),
+                ev("GPU string decoding", "utf8 decoding throughput")));
+        double on = RatedRetriever.coverage(q, List.of(ev("SerDes PCS", "8b/10b running disparity and the comma K28.5; "
+                + "64b/66b sync header, block lock state machine and self-synchronous scrambler")));
+        assertThat(off).isLessThan(RatedRetriever.MIN_COVERAGE);
+        assertThat(on).isGreaterThanOrEqualTo(RatedRetriever.MIN_COVERAGE);
     }
 }

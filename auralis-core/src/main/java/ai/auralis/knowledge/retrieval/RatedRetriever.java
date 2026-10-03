@@ -28,8 +28,13 @@ public class RatedRetriever {
 
 
     /** One round: the query used, Laya's verdict on the evidence it returned, and its probability. */
-    public record Round(int n, String query, String verdict, Double layaP) {
+    public record Round(int n, String query, String verdict, Double layaP, double coverage) {
     }
+
+    /** Below this share of the question's key terms present in the passages, Laya's "yes" is not trusted. */
+    static final double MIN_COVERAGE = 0.5;
+    private static final java.util.Set<String> STOP = java.util.Set.of("the", "and", "for", "with", "from", "into",
+            "that", "this", "what", "which", "how", "are", "per", "via", "its", "use", "using", "between", "about");
 
     public record Result(List<Evidence> evidence, List<Round> rounds, boolean sufficient) {
     }
@@ -54,13 +59,17 @@ public class RatedRetriever {
             }
             List<Evidence> best = best(merged, topK);
             if (best.isEmpty()) {
-                rounds.add(new Round(n, query, "EMPTY", null));
+                rounds.add(new Round(n, query, "EMPTY", null, 0.0));
                 break;
             }
             Decision d = decisions.decide(Spec.yesNo("retrieval", null, "evidence_sufficiency", Policy.LAYA,
                     "Do the sources cover the need?", state(question, best)));
-            rounds.add(new Round(n, query, d.yes() ? "SUFFICIENT" : "REFINE", d.layaP()));
-            if (d.yes()) {
+            double cov = coverage(question, best);
+            // Laya rates sufficiency from the titles; the passages must also actually contain the key
+            // terms (long multi-term queries otherwise fool both the reranker and the rating)
+            boolean ok = d.yes() && cov >= MIN_COVERAGE;
+            rounds.add(new Round(n, query, ok ? "SUFFICIENT" : d.yes() ? "REFINE (coverage)" : "REFINE", d.layaP(), cov));
+            if (ok) {
                 sufficient = true;
                 break;
             }
@@ -108,6 +117,18 @@ public class RatedRetriever {
                 .sorted(Map.Entry.<String, Integer>comparingByValue().reversed())
                 .limit(6).map(Map.Entry::getKey).collect(Collectors.joining(" "));
         return extra.isBlank() ? question : question + " " + extra;
+    }
+
+    /** Share of the question's distinctive terms (length >= 3, not stop words) found in the passages. */
+    static double coverage(String question, List<Evidence> evidence) {
+        Set<String> terms = words(question).stream().filter(w -> w.length() >= 3 && !STOP.contains(w))
+                .collect(Collectors.toSet());
+        if (terms.isEmpty()) {
+            return 1.0;
+        }
+        Set<String> seen = evidence.stream().flatMap(e -> words(e.content() + " " + e.documentTitle()).stream())
+                .collect(Collectors.toSet());
+        return (double) terms.stream().filter(seen::contains).count() / terms.size();
     }
 
     private static List<String> words(String text) {

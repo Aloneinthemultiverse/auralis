@@ -78,7 +78,8 @@ public class AuralisMcpTools {
         sb.append("Laya rating trail: ");
         for (RatedRetriever.Round rd : res.rounds()) {
             sb.append("round ").append(rd.n()).append(" [").append(rd.query()).append("] -> ").append(rd.verdict())
-                    .append(rd.layaP() != null ? String.format(Locale.ROOT, " (%.2f)", rd.layaP()) : "").append("; ");
+                    .append(rd.layaP() != null ? String.format(Locale.ROOT, " (%.2f)", rd.layaP()) : "")
+                    .append(String.format(Locale.ROOT, ", term coverage %.0f%%", 100 * rd.coverage())).append("; ");
         }
         sb.append(res.sufficient() ? "evidence rated SUFFICIENT." : "round cap reached; best evidence returned.");
         return sb.toString().strip();
