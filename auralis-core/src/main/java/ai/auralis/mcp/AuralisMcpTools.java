@@ -31,7 +31,7 @@ import ai.auralis.research.store.ResearchStore.Event;
 @Component
 public class AuralisMcpTools {
 
-    private static final int MAX_PASSAGE_CHARS = 1200;
+    private static final int MAX_PASSAGE_CHARS = 500;   // token budget: the best-matching window of each passage
 
     private final HybridRetriever retriever;
     private final RatedRetriever rated;
@@ -54,12 +54,12 @@ public class AuralisMcpTools {
             the best passages. Returns numbered passages with source titles and the rating trail.""")
     public String knowledgeSearch(
             @McpToolParam(description = "What to look for; a question or exact terms") String query,
-            @McpToolParam(description = "Number of passages, 1-20 (default 6)", required = false)
+            @McpToolParam(description = "Number of passages, 1-20 (default 4)", required = false)
             Integer topK,
-            @McpToolParam(description = "Max Laya-rated retrieval rounds, 1-5 (default 3; 1 = single pass)",
+            @McpToolParam(description = "Max Laya-rated retrieval rounds, 1-5 (default 1 = single pass, Laya still rates it; more rounds cost tokens)",
                     required = false) Integer rounds) {
-        int k = topK == null ? 6 : Math.max(1, Math.min(20, topK));
-        int r = rounds == null ? 3 : Math.max(1, Math.min(5, rounds));
+        int k = topK == null ? 4 : Math.max(1, Math.min(20, topK));
+        int r = rounds == null ? 1 : Math.max(1, Math.min(5, rounds));
         RatedRetriever.Result res = rated.retrieve(query, k, r, Scope.ALL);
         List<Evidence> hits = res.evidence();
         if (hits.isEmpty()) {
@@ -73,7 +73,7 @@ public class AuralisMcpTools {
                     .append(" (chunk ").append(e.ordinal())
                     .append(e.relevance() != null
                             ? String.format(Locale.ROOT, ", relevance %.2f", e.relevance()) : "")
-                    .append(")\n").append(clip(e.content())).append("\n\n");
+                    .append(")\n").append(clip(e.content(), query)).append("\n\n");
         }
         sb.append("Laya rating trail: ");
         for (RatedRetriever.Round rd : res.rounds()) {
@@ -208,5 +208,33 @@ public class AuralisMcpTools {
 
     private static String clip(String s) {
         return s.length() <= MAX_PASSAGE_CHARS ? s : s.substring(0, MAX_PASSAGE_CHARS) + " …";
+    }
+
+    /** The MAX_PASSAGE_CHARS window of the passage containing the most query terms (saves tokens). */
+    static String clip(String s, String query) {
+        String t = s.replaceAll("\s+", " ").strip();
+        if (t.length() <= MAX_PASSAGE_CHARS) {
+            return t;
+        }
+        String lower = t.toLowerCase(Locale.ROOT);
+        List<String> terms = java.util.Arrays.stream(query.toLowerCase(Locale.ROOT).split("[^a-z0-9/.-]+"))
+                .filter(w -> w.length() >= 3).toList();
+        int best = 0, bestHits = -1;
+        for (int start = 0; start + MAX_PASSAGE_CHARS <= t.length() + 100; start += 100) {
+            int end = Math.min(t.length(), start + MAX_PASSAGE_CHARS);
+            String win = lower.substring(Math.min(start, end), end);
+            int hits = 0;
+            for (String w : terms) {
+                if (win.contains(w)) {
+                    hits++;
+                }
+            }
+            if (hits > bestHits) {
+                bestHits = hits;
+                best = Math.min(start, Math.max(0, t.length() - MAX_PASSAGE_CHARS));
+            }
+        }
+        return (best > 0 ? "… " : "") + t.substring(best, Math.min(t.length(), best + MAX_PASSAGE_CHARS))
+                + (best + MAX_PASSAGE_CHARS < t.length() ? " …" : "");
     }
 }
