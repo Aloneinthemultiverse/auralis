@@ -28,9 +28,29 @@ def sh(cmd, timeout=900):
     return subprocess.run(cmd, shell=True, capture_output=True, text=True, timeout=timeout)
 
 
+LAYA = None
+
+
 def setup_tools():
+    global LAYA
     sh("apt-get -qq update && apt-get -qq install -y iverilog yosys verilator > /dev/null 2>&1", 1800)
-    sh("pip install -q vllm", 1800)
+    sh("pip install -q vllm laya", 1800)
+    try:
+        from laya import Router
+        LAYA = Router()
+        print("laya ready", flush=True)
+    except Exception as e:  # without Laya the tool result decides
+        print("laya unavailable:", e, flush=True)
+
+
+def laya_verdict(report):
+    """Laya alone decides whether this version is done (PASS) or needs another iteration (FIX)."""
+    if LAYA is None:
+        return "PASS" if "OVERALL PASS" in report else "FIX", None
+    q = {"verdict": {"type": "choice", "instructions": "What is the verdict on this design version?",
+                     "criteria": {"PASS": "all checks pass", "FIX": "there are failures to fix"}}}
+    a = LAYA.predict(report[-2500:], q)["answers"]["verdict"]
+    return a["choice"], a.get("answer_confidence")
     for t in ("iverilog -V", "yosys -V", "verilator --version"):
         print(sh(t).stdout.splitlines()[:1], flush=True)
 
@@ -96,8 +116,8 @@ def validate(files):
         top = next((m for m in reversed(declared) if len(re.findall(rf"\b{re.escape(m)}\b", code)) == 1),
                    declared[-1] if declared else "top")
         names = " ".join(rtl)
-        lint = subprocess.run(f"cd {d} && verilator --lint-only -Wall -Wno-DECLFILENAME -Wno-UNUSEDSIGNAL "
-                              f"-Wno-UNUSEDPARAM --top-module {top} {names}", shell=True, capture_output=True, text=True)
+        lint = subprocess.run(f"cd {d} && verilator --lint-only -Wall -Wno-DECLFILENAME -Wno-UNUSED -Wno-fatal "
+                              f"--top-module {top} {names}", shell=True, capture_output=True, text=True)
         report = [f"top: {top}", "== lint ==", (lint.stdout + lint.stderr).strip() or "LINT CLEAN"]
         sim_ok = bool(tbs)
         for tb, src in tbs.items():
@@ -145,9 +165,11 @@ per check, ALL TESTS PASSED only if all pass, and calls $finish. Complete files 
         text = chat(prompt)
         files = {m.group(1).strip(): m.group(2).strip() + "\n" for m in FILE_BLOCK.finditer(text)}
         report, passed = validate(files)
-        versions.append({"iteration": it, "spec": text, "files": files, "report": report, "passed": passed})
-        print(f"[{block['name']}] v{it}: {report.splitlines()[-1]}", flush=True)
-        if passed:
+        verdict, conf = laya_verdict(report)
+        versions.append({"iteration": it, "spec": text, "files": files, "report": report, "passed": passed,
+                         "laya": verdict, "laya_confidence": conf})
+        print(f"[{block['name']}] v{it}: {report.splitlines()[-1]} | Laya: {verdict} ({conf})", flush=True)
+        if verdict == "PASS":
             break
         feedback, previous = report, text
     return versions

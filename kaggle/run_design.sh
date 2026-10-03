@@ -41,7 +41,7 @@ cat > "$BUILD/kernel-metadata.json" <<EOF
 EOF
 kaggle kernels push -p "$BUILD"
 while true; do
-  STATUS="$(kaggle kernels status "$USER_NAME/$KERNEL_SLUG" 2>/dev/null | tail -1)"
+  STATUS="$(kaggle kernels status "$USER_NAME/$KERNEL_SLUG" 2>/dev/null | tail -1 || true)"  # a network blip must not end the wait
   echo "$(date +%T) $STATUS"
   case "$STATUS" in
     *COMPLETE*|*complete*|*ERROR*|*error*|*CANCEL*|*cancel*) break ;;
