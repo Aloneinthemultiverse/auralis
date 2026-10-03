@@ -15,6 +15,8 @@ import ai.auralis.knowledge.ingest.IngestionService;
 import ai.auralis.knowledge.ingest.IngestionService.IngestResult;
 import ai.auralis.knowledge.retrieval.Evidence;
 import ai.auralis.knowledge.retrieval.HybridRetriever;
+import ai.auralis.knowledge.retrieval.RatedRetriever;
+import ai.auralis.knowledge.retrieval.Scope;
 import ai.auralis.research.ResearchService;
 import ai.auralis.research.ResearchService.QuestionView;
 import ai.auralis.research.ResearchService.SessionView;
@@ -32,12 +34,14 @@ public class AuralisMcpTools {
     private static final int MAX_PASSAGE_CHARS = 1200;
 
     private final HybridRetriever retriever;
+    private final RatedRetriever rated;
     private final IngestionService ingestion;
     private final ResearchService research;
 
-    public AuralisMcpTools(HybridRetriever retriever, IngestionService ingestion,
+    public AuralisMcpTools(HybridRetriever retriever, RatedRetriever rated, IngestionService ingestion,
                            ResearchService research) {
         this.retriever = retriever;
+        this.rated = rated;
         this.ingestion = ingestion;
         this.research = research;
     }
@@ -45,13 +49,19 @@ public class AuralisMcpTools {
     @McpTool(name = "knowledge_search", description = """
             Search the Auralis engineering knowledge base (ingested papers, datasheets,
             standards, manuals, past research) with hybrid vector + keyword retrieval and
-            relevance reranking. Returns numbered passages with their source titles.""")
+            relevance reranking. Laya rates whether the evidence answers the query; on REFINE
+            the query is rewritten and retrieval repeats (up to `rounds`, default 3), merging
+            the best passages. Returns numbered passages with source titles and the rating trail.""")
     public String knowledgeSearch(
             @McpToolParam(description = "What to look for; a question or exact terms") String query,
             @McpToolParam(description = "Number of passages, 1-20 (default 6)", required = false)
-            Integer topK) {
+            Integer topK,
+            @McpToolParam(description = "Max Laya-rated retrieval rounds, 1-5 (default 3; 1 = single pass)",
+                    required = false) Integer rounds) {
         int k = topK == null ? 6 : Math.max(1, Math.min(20, topK));
-        List<Evidence> hits = retriever.retrieve(query, k, true);
+        int r = rounds == null ? 3 : Math.max(1, Math.min(5, rounds));
+        RatedRetriever.Result res = rated.retrieve(query, k, r, Scope.ALL);
+        List<Evidence> hits = res.evidence();
         if (hits.isEmpty()) {
             return "No passages found. The knowledge base may not cover this yet; "
                     + "consider knowledge_add_file / knowledge_add_text or research_start.";
@@ -65,6 +75,12 @@ public class AuralisMcpTools {
                             ? String.format(Locale.ROOT, ", relevance %.2f", e.relevance()) : "")
                     .append(")\n").append(clip(e.content())).append("\n\n");
         }
+        sb.append("Laya rating trail: ");
+        for (RatedRetriever.Round rd : res.rounds()) {
+            sb.append("round ").append(rd.n()).append(" [").append(rd.query()).append("] -> ").append(rd.verdict())
+                    .append(rd.layaP() != null ? String.format(Locale.ROOT, " (%.2f)", rd.layaP()) : "").append("; ");
+        }
+        sb.append(res.sufficient() ? "evidence rated SUFFICIENT." : "round cap reached; best evidence returned.");
         return sb.toString().strip();
     }
 
