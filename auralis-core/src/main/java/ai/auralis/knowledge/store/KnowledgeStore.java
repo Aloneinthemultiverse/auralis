@@ -113,6 +113,23 @@ public class KnowledgeStore {
                 .list();
     }
 
+    /** Exact nearest chunks over all embeddings (sequential scan): ground truth for evaluation. */
+    public List<ChunkHit> exactSearch(float[] queryEmbedding, int limit) {
+        return pgvectorSearch(queryEmbedding, limit, Scope.ALL);
+    }
+
+    /** The flat TurboVec index alone (2-bit scan + exact re-score). */
+    public List<ChunkHit> turbovecSearch(float[] queryEmbedding, int limit) {
+        return turboSearch(queryEmbedding, limit, Scope.ALL);
+    }
+
+    /** Random chunk texts, used as evaluation queries. */
+    public List<String> sampleChunkTexts(int n, double seed) {
+        jdbc.sql("SELECT setseed(?)").param(seed).query(Object.class).list();
+        return jdbc.sql("SELECT content FROM chunk WHERE length(content) > 200 ORDER BY random() LIMIT ?")
+                .param(n).query(String.class).list();
+    }
+
     /** Exact cosine re-score of given chunks within a scope, best first. */
     public List<ChunkHit> exactRescore(float[] queryEmbedding, List<UUID> chunkIds, int limit, Scope scope) {
         if (chunkIds.isEmpty()) {

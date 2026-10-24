@@ -13,9 +13,10 @@ import ai.auralis.knowledge.store.KnowledgeStore;
 import ai.auralis.knowledge.store.KnowledgeStore.ChunkHit;
 
 /**
- * Hybrid retrieval: dense (TurboVec / pgvector), lexical (Postgres full text)
- * and 2-bit graph (relationship) searches run in parallel, are fused with RRF,
- * and the head of the fused list is reranked by Laya.
+ * Hybrid retrieval: the TurboVec knowledge graph (2-bit codes + relationship
+ * edges in one index, searched by a graph walk) and lexical full text run in
+ * parallel, are fused with RRF, and the head is reranked by Laya. Until the graph
+ * is built, the flat TurboVec / pgvector index stands in for it.
  */
 @Service
 public class HybridRetriever {
@@ -46,10 +47,11 @@ public class HybridRetriever {
         List<ChunkHit> keyword;
         List<ChunkHit> related;
         try (var pool = Executors.newVirtualThreadPerTaskExecutor()) {
-            var v = CompletableFuture.supplyAsync(() -> store.vectorSearch(q, n, scope), pool);
+            var v = CompletableFuture.supplyAsync(() -> graph.ready()
+                    ? List.<ChunkHit>of() : store.vectorSearch(q, n, scope), pool);
             var k = CompletableFuture.supplyAsync(() -> store.keywordSearch(query, n, scope), pool);
             var g = CompletableFuture.supplyAsync(() -> graph.ready()
-                    ? graph.search(q, n, 2, scope).stream().map(GraphRetriever.PathHit::chunk).toList()
+                    ? graph.search(query, q, n, scope).stream().map(GraphRetriever.PathHit::chunk).toList()
                     : List.<ChunkHit>of(), pool);
             vector = v.join();
             keyword = k.join();
