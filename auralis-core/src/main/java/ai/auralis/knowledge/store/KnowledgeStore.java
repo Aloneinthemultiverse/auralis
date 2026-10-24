@@ -113,6 +113,30 @@ public class KnowledgeStore {
                 .list();
     }
 
+    /** Exact cosine re-score of given chunks within a scope, best first. */
+    public List<ChunkHit> exactRescore(float[] queryEmbedding, List<UUID> chunkIds, int limit, Scope scope) {
+        if (chunkIds.isEmpty()) {
+            return List.of();
+        }
+        String v = toVectorLiteral(queryEmbedding);
+        String csv = chunkIds.stream().map(UUID::toString).collect(java.util.stream.Collectors.joining(","));
+        List<Object> params = new ArrayList<>(List.of(v, csv));
+        params.addAll(java.util.Arrays.asList(scope.params()));
+        params.add(v);
+        params.add(limit);
+        return jdbc.sql("""
+                SELECT c.id, c.document_id, d.title, c.ordinal, c.content,
+                       1 - (c.embedding <=> ?::vector) AS score
+                FROM chunk c JOIN source_document d ON d.id = c.document_id
+                WHERE c.id = ANY(string_to_array(?, ',')::uuid[])""" + scope.sql() + """
+
+                ORDER BY c.embedding <=> ?::vector
+                LIMIT ?""")
+                .params(params)
+                .query(KnowledgeStore::mapRow)
+                .list();
+    }
+
     /** One-time / repair: (re)loads every chunk's embedding into TurboVec, calibrating first. */
     public int reindexTurbovec() {
         List<float[]> sample = jdbc.sql("SELECT embedding::text FROM chunk ORDER BY random() LIMIT 4000")

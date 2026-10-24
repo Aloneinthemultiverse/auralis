@@ -19,6 +19,11 @@ public final class ReciprocalRankFusion {
     }
 
     public static List<Evidence> fuse(List<ChunkHit> vector, List<ChunkHit> keyword, int k) {
+        return fuse(vector, keyword, List.of(), k);
+    }
+
+    /** Three-way fusion; {@code graph} is the 2-bit graph retriever's list. */
+    public static List<Evidence> fuse(List<ChunkHit> vector, List<ChunkHit> keyword, List<ChunkHit> graph, int k) {
         Map<UUID, Evidence> byId = new LinkedHashMap<>();
         for (ChunkHit h : vector) {
             byId.put(h.chunkId(), evidence(h, h.rank(), null, 1.0 / (k + h.rank())));
@@ -27,6 +32,11 @@ public final class ReciprocalRankFusion {
             double add = 1.0 / (k + h.rank());
             byId.merge(h.chunkId(), evidence(h, null, h.rank(), add),
                     (prev, kw) -> evidence(h, prev.vectorRank(), h.rank(), prev.fusedScore() + add));
+        }
+        for (ChunkHit h : graph) {
+            double add = 1.0 / (k + h.rank());
+            byId.merge(h.chunkId(), evidence(h, null, null, add),
+                    (prev, g) -> evidence(h, prev.vectorRank(), prev.keywordRank(), prev.fusedScore() + add));
         }
         return byId.values().stream()
                 .sorted(Comparator.comparingDouble(Evidence::fusedScore).reversed())

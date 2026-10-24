@@ -40,9 +40,24 @@ with `HF_HUB_OFFLINE=1` (the start script does).
 - REST: `POST /api/knowledge/documents` (file), `POST /api/knowledge/search`,
   `POST /api/research` `{objective, maxRounds, deepResearch: NONE|LOCAL|KAGGLE}`,
   `GET /api/research/{id}`, `GET /api/graph/osint/root`, `GET /api/graph/nodes/{id}`.
-- MCP at `http://localhost:8080/mcp`: `knowledge_search`, `knowledge_add_text`,
+- MCP at `http://localhost:8080/mcp`: `knowledge_search`, `knowledge_graph_search`, `knowledge_graph_status`, `knowledge_add_text`,
   `knowledge_add_file`, `research_start`, `research_status`, `graph_browse`, `graph_find`.
 - Claude Code: `/plugin marketplace add <repo path>` then `/plugin install auralis@auralis-local`.
+
+## 2-bit graph RAG
+
+`knowledge_search` fuses three retrievers with RRF: TurboVec (2-bit dense), Postgres full
+text, and a 2-bit relationship graph (`knowledge/graphvec`, pure Java). The graph links
+chunks, documents and technical terms (AXI, CVA6, LPDDR4…) with MENTIONS / PART_OF / NEXT
+edges; every node is a TurboQuant-style 2-bit code (randomized Hadamard rotation, Lloyd-Max
+levels, per-vector gain) plus a 2-bit neighbourhood code, so one scan scores nodes on
+themselves and on their neighbours. Hops are gated by the query shifted by a TransE relation
+vector; Postgres re-scores the short list exactly. ~52k nodes take ~40 MB and ~40 s to build;
+it rebuilds when the chunk count changes. `knowledge_graph_search` returns the relation path
+behind each passage.
+
+The chip-design UI is a separate app, **Auralis VSD** (`../auralis-vsd`), an MCP client of
+this server and the semiconductor server.
 
 ## Honest limits
 

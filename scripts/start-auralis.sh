@@ -20,7 +20,7 @@ status() {
            "ollama|up http://localhost:11434/api/tags" \
            "laya|up http://localhost:8000/health" \
            "core|up http://localhost:8080/actuator/health" \
-           "semiconductor|up http://localhost:8090/actuator/health"; do
+           "turbovec|up http://127.0.0.1:8100/health" \n           "semiconductor|up http://localhost:8090/actuator/health"; do
     name="${s%%|*}"; check="${s#*|}"
     if eval "$check" 2>/dev/null; then echo "  ✓ $name"; else echo "  ✗ $name"; fi
   done
@@ -64,6 +64,12 @@ if [ -d "$SEMI/server" ]; then
   else echo "  ✓ semiconductor"; fi
 fi
 docker image inspect auralis-pysandbox >/dev/null 2>&1 || docker build -q -t auralis-pysandbox "$ROOT/infra/pysandbox" >/dev/null
+
+echo "TurboVec"
+if ! up http://127.0.0.1:8100/health; then
+  (cd "$ROOT/vendor/turbovec-service" && nohup .venv/Scripts/python -m uvicorn app:app --host 127.0.0.1 --port 8100 </dev/null >"$LOGS/turbovec.log" 2>&1 &)
+  wait_for http://127.0.0.1:8100/health "turbovec (:8100)" 60 || exit 1
+else echo "  ✓ turbovec"; fi
 
 echo "Auralis core"
 if ! up http://localhost:8080/actuator/health; then
