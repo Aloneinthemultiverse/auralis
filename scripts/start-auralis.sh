@@ -20,7 +20,8 @@ status() {
            "ollama|up http://localhost:11434/api/tags" \
            "laya|up http://localhost:8000/health" \
            "core|up http://localhost:8080/actuator/health" \
-           "turbovec|up http://127.0.0.1:8100/health" \n           "semiconductor|up http://localhost:8090/actuator/health"; do
+           "turbovec|up http://127.0.0.1:8100/health" \
+           "semiconductor|up http://localhost:8090/actuator/health"; do
     name="${s%%|*}"; check="${s#*|}"
     if eval "$check" 2>/dev/null; then echo "  ✓ $name"; else echo "  ✗ $name"; fi
   done
