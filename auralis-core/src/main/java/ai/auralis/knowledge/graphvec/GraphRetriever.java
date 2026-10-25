@@ -25,8 +25,8 @@ public class GraphRetriever {
     public record PathHit(ChunkHit chunk, String path, boolean bridge) {
     }
 
-    /** Walk beam width; overridable for evaluation. */
-    static volatile int EF = 200;
+    /** Acceptance margin below the best 2-bit score; overridable for evaluation. */
+    static volatile float DELTA = 0.12f;
 
     private final GraphVecIndex index;
     private final KnowledgeStore store;
@@ -40,8 +40,9 @@ public class GraphRetriever {
         return index.ready();
     }
 
-    public List<PathHit> search(String query, float[] queryEmbedding, int limit, Scope scope) {
-        List<GraphVecIndex.Hit> hits = index.search(query, queryEmbedding, limit * 10, Math.max(EF, limit * 16));
+    /** Every chunk the expansion accepted, direct hits first, each exactly re-scored. */
+    public List<PathHit> search(String query, float[] queryEmbedding, Scope scope) {
+        List<GraphVecIndex.Hit> hits = index.search(query, queryEmbedding, DELTA);
         if (hits.isEmpty()) {
             return List.of();
         }
@@ -50,11 +51,11 @@ public class GraphRetriever {
         List<UUID> direct = hits.stream().filter(h -> !h.bridge()).map(GraphVecIndex.Hit::chunkId).toList();
         List<UUID> bridge = hits.stream().filter(GraphVecIndex.Hit::bridge).map(GraphVecIndex.Hit::chunkId).toList();
         List<PathHit> out = new ArrayList<>();
-        for (ChunkHit c : store.exactRescore(queryEmbedding, direct, limit, scope)) {
+        for (ChunkHit c : store.exactRescore(queryEmbedding, direct, direct.size(), scope)) {
             out.add(new PathHit(c, byId.get(c.chunkId()).path(), false));
         }
         int rank = out.size();
-        for (ChunkHit c : store.exactRescore(queryEmbedding, bridge, Math.max(1, limit / 3), scope)) {
+        for (ChunkHit c : store.exactRescore(queryEmbedding, bridge, bridge.size(), scope)) {
             out.add(new PathHit(new ChunkHit(c.chunkId(), c.documentId(), c.documentTitle(), c.ordinal(),
                     c.content(), ++rank, c.rawScore()), byId.get(c.chunkId()).path(), true));
         }

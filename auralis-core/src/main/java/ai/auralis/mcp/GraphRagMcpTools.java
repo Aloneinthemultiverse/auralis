@@ -39,16 +39,20 @@ public class GraphRagMcpTools {
             knowledge_search uses this same walk; use this tool to see the relationships.""")
     public String search(
             @McpToolParam(description = "Question or terms") String query,
-            @McpToolParam(description = "Number of passages, 1-20 (default 5)", required = false) Integer topK) {
+            @McpToolParam(description = "How many of the accepted passages to print (default 8); retrieval itself has no k",
+                    required = false) Integer show) {
         if (!retriever.ready()) {
             return "Graph index not ready: " + index.status();
         }
-        int k = topK == null ? 5 : Math.max(1, Math.min(20, topK));
-        List<PathHit> hits = retriever.search(query, embedder.embedQuery(query), k, Scope.ALL);
+        int k = show == null ? 8 : Math.max(1, Math.min(50, show));
+        List<PathHit> all = retriever.search(query, embedder.embedQuery(query), Scope.ALL);
+        var w = index.lastWalk();
+        List<PathHit> hits = all.subList(0, Math.min(k, all.size()));
         if (hits.isEmpty()) {
             return "No connected passages found.";
         }
-        StringBuilder sb = new StringBuilder();
+        StringBuilder sb = new StringBuilder("Expansion accepted %d passages (%d bridge) after scoring %d nodes; showing %d.%n%n"
+                .formatted(all.size(), all.stream().filter(PathHit::bridge).count(), w.scored(), hits.size()));
         for (int i = 0; i < hits.size(); i++) {
             PathHit p = hits.get(i);
             String text = p.chunk().content();
@@ -62,17 +66,18 @@ public class GraphRagMcpTools {
     }
 
     @McpTool(name = "knowledge_graph_eval", description = """
-            Measure the TurboVec knowledge graph: recall and latency of the 2-bit graph walk and
-            of the flat TurboVec scan against exact search, on queries cut from random chunks.""")
+            Measure the TurboVec knowledge graph expansion (no top-k) against exact search:
+            coverage of the exact top-10, accepted-set size and nodes scored, per acceptance margin.""")
     public String eval(
             @McpToolParam(description = "Number of queries (default 50)", required = false) Integer queries,
-            @McpToolParam(description = "k (default 10)", required = false) Integer k,
-            @McpToolParam(description = "Sweep beam widths instead of one run", required = false) Boolean sweep) {
-        if (Boolean.TRUE.equals(sweep)) {
-            return evaluator.sweep(queries == null ? 50 : Math.max(5, Math.min(500, queries)), k == null ? 10 : k);
+            @McpToolParam(description = "Comma-separated margins (default 0.04,0.08,0.12,0.16,0.20)",
+                    required = false) String deltas) {
+        String[] parts = (deltas == null || deltas.isBlank() ? "0.04,0.08,0.12,0.16,0.20" : deltas).split(",");
+        float[] d = new float[parts.length];
+        for (int i = 0; i < parts.length; i++) {
+            d[i] = Float.parseFloat(parts[i].trim());
         }
-        return evaluator.evaluate(queries == null ? 50 : Math.max(5, Math.min(500, queries)),
-                k == null ? 10 : Math.max(1, Math.min(50, k)));
+        return evaluator.evaluate(queries == null ? 50 : Math.max(5, Math.min(500, queries)), d);
     }
 
     @McpTool(name = "knowledge_graph_status", description = "Size and state of the 2-bit graph index; set rebuild=true to rebuild it now.")

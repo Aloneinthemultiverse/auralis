@@ -50,7 +50,7 @@ public class HybridRetriever {
             var v = CompletableFuture.supplyAsync(() -> store.vectorSearch(q, n, scope), pool);
             var k = CompletableFuture.supplyAsync(() -> store.keywordSearch(query, n, scope), pool);
             var g = CompletableFuture.supplyAsync(() -> graph.ready()
-                    ? graph.search(query, q, n, scope).stream().map(GraphRetriever.PathHit::chunk).toList()
+                    ? graph.search(query, q, scope).stream().map(GraphRetriever.PathHit::chunk).toList()
                     : List.<ChunkHit>of(), pool);
             vector = v.join();
             keyword = k.join();

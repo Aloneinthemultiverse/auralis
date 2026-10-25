@@ -5,6 +5,7 @@ import java.util.BitSet;
 import java.util.HashMap;
 import java.util.HashSet;
 import java.util.LinkedHashMap;
+import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Map;
 import java.util.PriorityQueue;
@@ -33,12 +34,11 @@ import ai.auralis.knowledge.graphvec.TwoBitCodec.Code;
  * search over the graph so far (navigable small world), so the same graph also
  * serves as the vector index.</li>
  * </ul>
- * Retrieval is a best-first walk over this graph scored only with 2-bit codes:
- * it enters at the nodes of terms named in the query and at the entry chunk, moves
- * along both edge families (knowledge edges with a TransE relation shift), and in a
- * second phase walks again with the residual query (the query minus what the
- * best passages already answer) to reach the evidence for the rest of a multi-part
- * question. Full precision is used only to re-score the final short list.
+ * Retrieval is neighbour-local expansion scored only with 2-bit codes, with no
+ * top-k: greedy descent to local peaks, then threshold expansion along both edge
+ * families (knowledge edges with a TransE relation shift), then the same with the
+ * residual query (the query minus what the best passages already answer) to reach
+ * the evidence for the rest of a multi-part question. Full precision is used only to re-score the final short list.
  */
 @Service
 public class GraphVecIndex {
@@ -59,6 +59,8 @@ public class GraphVecIndex {
     private static final int EF_BUILD = 48;
     /** Neighbours of a hub (document, common term) scored per expansion. */
     private static final int HUB_CAP = 256;
+    /** Safety stop for a degenerate threshold; not a k. */
+    private static final int MAX_ACCEPTED = 20_000;
 
     private static final Pattern TERM = Pattern.compile(
             "\\b(?:[A-Z][A-Z0-9]{1,11}(?:[-_][A-Z0-9]{1,8})?|[A-Za-z]{2,10}\\d{1,5}[A-Za-z0-9]{0,6})\\b");
@@ -398,12 +400,20 @@ public class GraphVecIndex {
     }
 
     /**
-     * Retrieval as a walk over the TurboVec knowledge graph.
-     * Phase 1 walks from the query's term nodes and the entry chunk with the query.
-     * Phase 2 walks again from the best passages with the residual query, so the rest
-     * of a multi-part question pulls in its own evidence (marked as bridge hits).
+     * Retrieval as neighbour-local expansion over the TurboVec knowledge graph. There
+     * is no top-k and no beam: every step scores only the current node's neighbours.
+     * <ol>
+     * <li>Greedy descent: from each entry (query term nodes, the entry chunk) move to
+     * the best neighbour until no neighbour scores higher: a local peak.</li>
+     * <li>Threshold expansion: from the peaks, accept every neighbour whose 2-bit score
+     * is within {@code delta} of the best score seen, and expand the accepted nodes.</li>
+     * <li>Residual expansion: the same from the two best passages with the residual
+     * query, accepting the evidence for the rest of the question (bridge hits).</li>
+     * </ol>
+     * Cost is O(total degree of the accepted nodes); the result size is decided by
+     * relevance, not by k.
      */
-    public List<Hit> search(String queryText, float[] queryEmbedding, int limit, int ef) {
+    public List<Hit> search(String queryText, float[] queryEmbedding, float delta) {
         Snapshot s = snap;
         if (s == null || s.chunks() == 0) {
             return List.of();
@@ -420,17 +430,18 @@ public class GraphVecIndex {
             }
         }
         entries.add(s.entry());
-        Map<Integer, float[]> found = new HashMap<>();
+        Map<Integer, Float> accepted = new HashMap<>();
         Map<Integer, Integer> parent = new HashMap<>();
         Map<Integer, Integer> parentRel = new HashMap<>();
-        walk(s, q, entries, ef, found, parent, parentRel, scored, expanded);
+        expand(s, q, descend(s, q, entries, parent, parentRel, scored, expanded), delta,
+                accepted, parent, parentRel, scored, expanded);
 
         // Residual query: remove what the two best passages already answer.
-        List<Integer> top = found.entrySet().stream()
+        List<Integer> top = accepted.entrySet().stream()
                 .filter(e -> s.kind()[e.getKey()] == Kind.CHUNK)
-                .sorted((a, b) -> Float.compare(b.getValue()[0], a.getValue()[0]))
+                .sorted((a, b) -> Float.compare(b.getValue(), a.getValue()))
                 .limit(2).map(Map.Entry::getKey).toList();
-        Map<Integer, float[]> bridge = new HashMap<>();
+        Map<Integer, Float> bridge = new HashMap<>();
         Map<Integer, Integer> bParent = new HashMap<>(parent);
         Map<Integer, Integer> bRel = new HashMap<>(parentRel);
         if (!top.isEmpty()) {
@@ -448,67 +459,89 @@ public class GraphVecIndex {
                     res[k] -= f * nvec[k];
                 }
             }
-            walk(s, res, top, ef / 2, bridge, bParent, bRel, scored, expanded);
+            expand(s, res, descend(s, res, top, bParent, bRel, scored, expanded), delta,
+                    bridge, bParent, bRel, scored, expanded);
         }
         lastWalk = new WalkStats(scored[0], expanded[0]);
 
         List<Hit> hits = new ArrayList<>();
-        Set<Integer> taken = new HashSet<>();
-        found.entrySet().stream()
-                .filter(e -> s.kind()[e.getKey()] == Kind.CHUNK)
-                .sorted((a, b) -> Float.compare(b.getValue()[0], a.getValue()[0]))
-                .limit(limit)
-                .forEach(e -> {
-                    taken.add(e.getKey());
-                    hits.add(new Hit(s.ref()[e.getKey()], codec.scoreCorrected(q, s.code()[e.getKey()]),
-                            path(s, e.getKey(), parent, parentRel), false));
-                });
-        bridge.entrySet().stream()
-                .filter(e -> s.kind()[e.getKey()] == Kind.CHUNK && !taken.contains(e.getKey()))
-                .sorted((a, b) -> Float.compare(b.getValue()[0], a.getValue()[0]))
-                .limit(Math.max(1, limit / 3))
-                .forEach(e -> hits.add(new Hit(s.ref()[e.getKey()], e.getValue()[0],
-                        path(s, e.getKey(), bParent, bRel), true)));
+        accepted.forEach((v, sc) -> {
+            if (s.kind()[v] == Kind.CHUNK) {
+                hits.add(new Hit(s.ref()[v], sc, path(s, v, parent, parentRel), false));
+            }
+        });
+        bridge.forEach((v, sc) -> {
+            if (s.kind()[v] == Kind.CHUNK && !accepted.containsKey(v)) {
+                hits.add(new Hit(s.ref()[v], sc, path(s, v, bParent, bRel), true));
+            }
+        });
+        hits.sort((a, b) -> Float.compare(b.score(), a.score()));
         return hits;
     }
 
-    /** Best-first walk over all edges, scored with 2-bit codes only. */
-    private void walk(Snapshot s, float[] q, List<Integer> starts, int ef, Map<Integer, float[]> found,
-                      Map<Integer, Integer> parent, Map<Integer, Integer> parentRel, int[] scored, int[] expanded) {
-        // q - 0.5 r per knowledge relation (forward) and q + 0.5 r (backward); SIMILAR is unshifted.
-        float[][][] shifted = new float[RELS.length][2][];
-        for (int r = 0; r < RELS.length; r++) {
-            float[] fwd = q.clone();
-            float[] bwd = q.clone();
-            if (r != SIMILAR) {
-                for (int k = 0; k < q.length; k++) {
-                    fwd[k] -= 0.5f * s.relVec()[r][k];
-                    bwd[k] += 0.5f * s.relVec()[r][k];
+    /** Greedy descent from each start to a local peak; returns the distinct peaks. */
+    private List<Integer> descend(Snapshot s, float[] q, List<Integer> starts, Map<Integer, Integer> parent,
+                                  Map<Integer, Integer> parentRel, int[] scored, int[] expanded) {
+        float[][][] shifted = shifted(s, q);
+        Set<Integer> peaks = new LinkedHashSet<>();
+        for (int start : starts) {
+            int u = start;
+            float su = codec.score(q, s.code()[u]);
+            scored[0]++;
+            for (int guard = 0; guard < 64; guard++) {
+                expanded[0]++;
+                int bestV = -1;
+                int bestR = 0;
+                float bestS = su;
+                int[] nb = s.adj()[u];
+                int step = Math.max(1, nb.length / HUB_CAP);
+                for (int j = 0; j < nb.length; j += step) {
+                    int v = nb[j];
+                    int r = s.rel()[u][j];
+                    float sv = codec.score(shifted[r][u < v ? 0 : 1], s.code()[v]);
+                    scored[0]++;
+                    if (sv > bestS) {
+                        bestS = sv;
+                        bestV = v;
+                        bestR = r;
+                    }
                 }
+                if (bestV < 0) {
+                    break;
+                }
+                parent.putIfAbsent(bestV, u);
+                parentRel.putIfAbsent(bestV, bestR);
+                u = bestV;
+                su = bestS;
             }
-            shifted[r][0] = fwd;
-            shifted[r][1] = bwd;
+            peaks.add(u);
         }
+        return new ArrayList<>(peaks);
+    }
+
+    /**
+     * Threshold expansion: accept a neighbour if its score is within {@code delta} of the
+     * best score seen so far, then expand it. Only neighbours of accepted nodes are scored.
+     */
+    private void expand(Snapshot s, float[] q, List<Integer> peaks, float delta, Map<Integer, Float> accepted,
+                        Map<Integer, Integer> parent, Map<Integer, Integer> parentRel, int[] scored, int[] expanded) {
+        float[][][] shifted = shifted(s, q);
         BitSet seen = new BitSet(s.size());
-        PriorityQueue<float[]> cand = new PriorityQueue<>((a, b) -> Float.compare(b[0], a[0]));
-        PriorityQueue<float[]> best = new PriorityQueue<>((a, b) -> Float.compare(a[0], b[0]));
-        for (int st : starts) {
-            if (seen.get(st)) {
+        java.util.ArrayDeque<Integer> queue = new java.util.ArrayDeque<>();
+        float best = Float.NEGATIVE_INFINITY;
+        for (int p : peaks) {
+            float sp = codec.score(q, s.code()[p]);
+            scored[0]++;
+            best = Math.max(best, sp);
+            seen.set(p);
+            accepted.put(p, sp);
+            queue.add(p);
+        }
+        while (!queue.isEmpty() && accepted.size() < MAX_ACCEPTED) {
+            int u = queue.poll();
+            if (accepted.get(u) < best - delta) {
                 continue;
             }
-            seen.set(st);
-            float sc = codec.score(q, s.code()[st]);
-            scored[0]++;
-            cand.add(new float[] {sc, st});
-            best.add(new float[] {sc, st});
-            found.putIfAbsent(st, new float[] {sc});
-        }
-        while (!cand.isEmpty()) {
-            float[] c = cand.poll();
-            if (best.size() >= ef && c[0] < best.peek()[0]) {
-                break;
-            }
-            int u = (int) c[1];
             expanded[0]++;
             int[] nb = s.adj()[u];
             int step = Math.max(1, nb.length / HUB_CAP);
@@ -519,20 +552,38 @@ public class GraphVecIndex {
                 }
                 seen.set(v);
                 int r = s.rel()[u][j];
-                float sc = codec.score(shifted[r][u < v ? 0 : 1], s.code()[v]);
+                float sv = codec.score(shifted[r][u < v ? 0 : 1], s.code()[v]);
                 scored[0]++;
-                if (best.size() < ef || sc > best.peek()[0]) {
-                    cand.add(new float[] {sc, v});
-                    best.add(new float[] {sc, v});
-                    if (best.size() > ef) {
-                        best.poll();
-                    }
-                    found.put(v, new float[] {sc});
+                if (sv >= best - delta) {
+                    accepted.put(v, sv);
                     parent.putIfAbsent(v, u);
                     parentRel.putIfAbsent(v, r);
+                    queue.add(v);
+                    best = Math.max(best, sv);
                 }
             }
         }
+        // Drop nodes accepted before the best score rose past their threshold.
+        float cut = best - delta;
+        accepted.values().removeIf(sc -> sc < cut);
+    }
+
+    /** q - 0.5 r (forward) and q + 0.5 r (backward) per knowledge relation; SIMILAR unshifted. */
+    private static float[][][] shifted(Snapshot s, float[] q) {
+        float[][][] out = new float[RELS.length][2][];
+        for (int r = 0; r < RELS.length; r++) {
+            float[] fwd = q.clone();
+            float[] bwd = q.clone();
+            if (r != SIMILAR) {
+                for (int k = 0; k < q.length; k++) {
+                    fwd[k] -= 0.5f * s.relVec()[r][k];
+                    bwd[k] += 0.5f * s.relVec()[r][k];
+                }
+            }
+            out[r][0] = fwd;
+            out[r][1] = bwd;
+        }
+        return out;
     }
 
     private static String path(Snapshot s, int v, Map<Integer, Integer> parent, Map<Integer, Integer> rel) {
