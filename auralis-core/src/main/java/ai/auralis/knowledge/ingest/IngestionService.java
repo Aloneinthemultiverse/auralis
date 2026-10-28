@@ -13,6 +13,7 @@ import org.springframework.ai.reader.tika.TikaDocumentReader;
 import org.springframework.core.io.Resource;
 import org.springframework.stereotype.Service;
 
+import ai.auralis.knowledge.hippo.FactExtractor;
 import ai.auralis.knowledge.store.KnowledgeStore;
 import ai.auralis.knowledge.store.KnowledgeStore.NewChunk;
 
@@ -29,11 +30,13 @@ public class IngestionService {
     private final TextChunker chunker;
     private final Embedder embedder;
     private final KnowledgeStore store;
+    private final FactExtractor facts;
 
-    public IngestionService(TextChunker chunker, Embedder embedder, KnowledgeStore store) {
+    public IngestionService(TextChunker chunker, Embedder embedder, KnowledgeStore store, FactExtractor facts) {
         this.chunker = chunker;
         this.embedder = embedder;
         this.store = store;
+        this.facts = facts;
     }
 
     public IngestResult ingest(Resource resource, String title, String sourceType, String uri) {
@@ -59,6 +62,7 @@ public class IngestionService {
                 .mapToObj(i -> new NewChunk(pieces.get(i), vectors.get(i)))
                 .toList();
         UUID id = store.saveDocument(title, sourceType, uri, hash, chunks);
+        facts.enqueue(store.chunksOf(id));
         return new IngestResult(id, chunks.size(), false);
     }
 

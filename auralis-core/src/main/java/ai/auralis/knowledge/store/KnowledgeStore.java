@@ -2,6 +2,7 @@ package ai.auralis.knowledge.store;
 
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Map;
 import java.util.Optional;
 import java.util.UUID;
 
@@ -111,6 +112,30 @@ public class KnowledgeStore {
                 .params(v, csv, v, limit)
                 .query(KnowledgeStore::mapRow)
                 .list();
+    }
+
+    /** The given chunks in the given order (rank = position), with their cosine to the query. */
+    public List<ChunkHit> inOrder(float[] queryEmbedding, List<UUID> chunkIds, Scope scope) {
+        Map<UUID, Integer> pos = new java.util.HashMap<>();
+        for (int i = 0; i < chunkIds.size(); i++) {
+            pos.putIfAbsent(chunkIds.get(i), i);
+        }
+        List<ChunkHit> hits = new ArrayList<>(exactRescore(queryEmbedding, chunkIds, chunkIds.size(), scope));
+        hits.sort(java.util.Comparator.comparingInt(h -> pos.get(h.chunkId())));
+        List<ChunkHit> out = new ArrayList<>(hits.size());
+        for (int i = 0; i < hits.size(); i++) {
+            ChunkHit h = hits.get(i);
+            out.add(new ChunkHit(h.chunkId(), h.documentId(), h.documentTitle(), h.ordinal(), h.content(), i + 1,
+                    h.rawScore()));
+        }
+        return out;
+    }
+
+    /** A document's chunks (id, text), for fact extraction after ingestion. */
+    public List<Map.Entry<UUID, String>> chunksOf(UUID documentId) {
+        return jdbc.sql("SELECT id, content FROM chunk WHERE document_id = ? ORDER BY ordinal")
+                .param(documentId)
+                .query((rs, i) -> Map.entry(rs.getObject(1, UUID.class), rs.getString(2))).list();
     }
 
     /** Exact nearest chunks over all embeddings (sequential scan): ground truth for evaluation. */

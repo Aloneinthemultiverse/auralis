@@ -8,15 +8,16 @@ import org.springframework.stereotype.Service;
 
 import ai.auralis.config.AuralisProperties;
 import ai.auralis.knowledge.graphvec.GraphRetriever;
+import ai.auralis.knowledge.hippo.HippoIndex;
 import ai.auralis.knowledge.ingest.Embedder;
 import ai.auralis.knowledge.store.KnowledgeStore;
 import ai.auralis.knowledge.store.KnowledgeStore.ChunkHit;
 
 /**
- * Hybrid retrieval: the flat TurboVec index, the TurboVec knowledge graph (2-bit
- * codes + relationship edges in one index, searched by a graph walk) and lexical
- * full text run in parallel, are fused with RRF, and the head is reranked by Laya.
- * The flat index stays until the graph walk matches its recall (knowledge_graph_eval).
+ * Hybrid retrieval: the flat TurboVec index, lexical full text and a relationship
+ * leg run in parallel, are fused with RRF, and the head is reranked by Laya. The
+ * relationship leg is TurboVec-HippoRAG (2-bit fact graph + Personalized PageRank)
+ * once facts exist, otherwise the 2-bit term graph walk.
  */
 @Service
 public class HybridRetriever {
@@ -25,14 +26,16 @@ public class HybridRetriever {
     private final KnowledgeStore store;
     private final LayaReranker reranker;
     private final GraphRetriever graph;
+    private final HippoIndex hippo;
     private final AuralisProperties.Retrieval cfg;
 
     public HybridRetriever(Embedder embedder, KnowledgeStore store, LayaReranker reranker,
-                           GraphRetriever graph, AuralisProperties props) {
+                           GraphRetriever graph, HippoIndex hippo, AuralisProperties props) {
         this.embedder = embedder;
         this.store = store;
         this.reranker = reranker;
         this.graph = graph;
+        this.hippo = hippo;
         this.cfg = props.retrieval();
     }
 
@@ -49,7 +52,10 @@ public class HybridRetriever {
         try (var pool = Executors.newVirtualThreadPerTaskExecutor()) {
             var v = CompletableFuture.supplyAsync(() -> store.vectorSearch(q, n, scope), pool);
             var k = CompletableFuture.supplyAsync(() -> store.keywordSearch(query, n, scope), pool);
-            var g = CompletableFuture.supplyAsync(() -> graph.ready()
+            // Relationship leg: TurboVec-HippoRAG (fact graph) when it has facts, else the term graph.
+            var g = CompletableFuture.supplyAsync(() -> hippo.ready()
+                    ? store.inOrder(q, hippo.search(q, n).chunkIds(), scope)
+                    : graph.ready()
                     ? graph.search(query, q, scope).stream().map(GraphRetriever.PathHit::chunk).toList()
                     : List.<ChunkHit>of(), pool);
             vector = v.join();
