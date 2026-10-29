@@ -21,7 +21,7 @@ status() {
            "laya|up http://localhost:8000/health" \
            "core|up http://localhost:8080/actuator/health" \
            "turbovec|up http://127.0.0.1:8100/health" \
-           "semiconductor|up http://localhost:8090/actuator/health"; do
+           "semiconductor|up http://localhost:8091/actuator/health"; do
     name="${s%%|*}"; check="${s#*|}"
     if eval "$check" 2>/dev/null; then echo "  ✓ $name"; else echo "  ✗ $name"; fi
   done
@@ -59,9 +59,9 @@ SEMI="${AURALIS_SEMI_DIR:-$ROOT/../auralis-semiconductor}"
 if [ -d "$SEMI/server" ]; then
   echo "Semiconductor domain server"
   docker image inspect auralis-eda >/dev/null 2>&1 || docker build -q -t auralis-eda "$SEMI/eda" >/dev/null
-  if ! up http://localhost:8090/actuator/health; then
+  if ! up http://localhost:8091/actuator/health; then
     (cd "$SEMI/server" && nohup ./mvnw -q -B spring-boot:run </dev/null >"$LOGS/semiconductor.log" 2>&1 &)
-    wait_for http://localhost:8090/actuator/health "semiconductor (MCP :8090/mcp)" 90 || true
+    wait_for http://localhost:8091/actuator/health "semiconductor (MCP :8091/mcp)" 90 || true
   else echo "  ✓ semiconductor"; fi
 fi
 docker image inspect auralis-pysandbox >/dev/null 2>&1 || docker build -q -t auralis-pysandbox "$ROOT/infra/pysandbox" >/dev/null

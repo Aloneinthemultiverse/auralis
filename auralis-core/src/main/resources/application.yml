@@ -67,7 +67,7 @@ auralis:
   # Their tools join the design tool registry; a <domain>_guidance + <domain>_validate
   # pair registers a design domain.
   tool-servers:
-    semiconductor: http://localhost:8090
+    semiconductor: http://localhost:8091
   deep-research:
     agent-harness-dir: ../vendor/AgentHarness
     python: .venv/Scripts/python.exe
